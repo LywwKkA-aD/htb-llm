@@ -174,22 +174,30 @@ const htbHostname = (name: string) => {
   const s = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   return s ? `${s}.htb` : "";
 };
-// Активный HTB-инстанс получил новый IP — обновить TARGET/hostname и строку IP в брифе существующей задачи.
-function syncHtbTaskTarget(m: { id: number; name?: string; ip?: string | null } | null | undefined) {
+// Активный HTB-инстанс получил новый IP — обновить TARGET/hostname и строку IP в брифе существующей задачи
+// и разнести новый адрес по живому контейнеру (hosts/TASK.md/профиль — sandbox.applyTargetChange).
+async function syncHtbTaskTarget(m: { id: number; name?: string; ip?: string | null } | null | undefined) {
   if (!m?.ip || !isIpv4(m.ip)) return;
   const marker = `HTB machine #${m.id}`;
-  const t = db.prepare("select * from tasks where brief like ?").get(`${marker}%`) as Task | undefined;
+  let t = db.prepare("select * from tasks where brief like ?").get(`${marker}%`) as Task | undefined;
+  if (!t && m.name) {
+    // задача создана вручную без маркера импорта: единственный кандидат с hostname этой машины
+    const rows = db.prepare("select * from tasks where hostname=?").all(htbHostname(m.name)) as Task[];
+    if (rows.length === 1) t = rows[0];
+  }
   if (!t) return;
   const hostname = t.hostname || htbHostname(m.name ?? t.title);
   let brief = t.brief;
   if (/^IP \(текущий инстанс\):.*$/m.test(brief)) brief = brief.replace(/^IP \(текущий инстанс\):.*$/m, `IP (текущий инстанс): ${m.ip}`);
   else brief = brief.replace(/^IP:.*$/m, `IP (текущий инстанс): ${m.ip}`);
-  if (t.target !== m.ip || t.hostname !== hostname || brief !== t.brief)
+  if (t.target !== m.ip || t.hostname !== hostname || brief !== t.brief) {
     db.prepare("update tasks set target=?, hostname=?, brief=?, updated_at=? where id=?").run(m.ip, hostname, brief, now(), t.id);
+    if (t.target !== m.ip) await sandbox.applyTargetChange(t.id, t.target, m.ip).catch(() => {});
+  }
 }
 async function htbStatusSynced(refresh = false) {
   const st = await htb.htbStatus(refresh);
-  syncHtbTaskTarget(st.activeMachine);
+  await syncHtbTaskTarget(st.activeMachine);
   return st;
 }
 function createTaskWithChat(title: string, course: string, brief: string, target = "", hostname = "") {
@@ -244,7 +252,7 @@ app.post("/api/htb/import", wrap(async (req) => {
 Возможный порядок этапов (общая цель, не поручение выполнять этапы без указания пользователя): скан портов и энумерация сервисов → точка входа → стабильный шелл → user → повышение привилегий → root. Находки и креды — карточками в память задачи.`;
   return { ...createTaskWithChat(taskTitle(m.name), "HackTheBox", brief, m.ip && isIpv4(m.ip) ? m.ip : "", htbHostname(m.name)), existed: false };
 }));
-app.patch("/api/tasks/:id", wrap((req) => {
+app.patch("/api/tasks/:id", wrap(async (req) => {
   const t = db.prepare("select * from tasks where id=?").get(P(req, "id")) as Task | undefined;
   if (!t) throw new HttpError(404, "нет задачи");
   const b = req.body ?? {};
@@ -252,6 +260,7 @@ app.patch("/api/tasks/:id", wrap((req) => {
   const course = str(b.course, "course", t.course), brief = str(b.brief, "brief", t.brief);
   const target = optTarget(b.target, t.target), hostname = optHostname(b.hostname, t.hostname);
   db.prepare("update tasks set title=?, course=?, brief=?, target=?, hostname=?, updated_at=? where id=?").run(title, course, brief, target, hostname, now(), t.id);
+  if (target !== t.target) await sandbox.applyTargetChange(t.id, t.target, target).catch(() => {});
   return db.prepare("select * from tasks where id=?").get(t.id);
 }));
 app.delete("/api/tasks/:id", wrap(async (req) => {

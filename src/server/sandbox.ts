@@ -1819,13 +1819,43 @@ async function runBrowserStart(taskId: string) {
   agentNote(taskId, "Браузер: Firefox в сети контейнера поднят — вкладка «Браузер» (цели через VPN видны напрямую, имена .htb подтянуты из hosts контейнера)");
 }
 
-// Имена целей (machine.htb и vhost'ы) живут в /etc/hosts контейнера задачи; у сайдкара файл свой.
+// Имена целей (machine.htb и vhost'ы) живут в /etc/hosts контейнера задачи; у сайдкара файл свой —
+// тот же отмеченный блок, что syncHosts, плюс вычистка наших старых строк вне блока (смена IP!).
 async function syncBrowserHosts(taskId: string, sidecar: Docker.Container) {
-  const hosts = (await execCollect(taskId, "cat /etc/hosts", 10)).output;
-  const lines = hosts.split("\n").map((l) => l.trim()).filter((l) =>
-    l && !l.startsWith("#") && !/^127\.|^::1|^fe00|^ff00/.test(l));
-  if (!lines.length) return;
-  await execRaw(sidecar, lines.map((l) => `grep -qxF ${shq(l)} /etc/hosts || echo ${shq(l)} >> /etc/hosts`).join("\n"), 10_000);
+  const m = taskMeta(taskId);
+  if (!isIpv4(m.target)) return;
+  const hosts = [...new Set([m.hostname, "machine.htb"].filter(isHostname))];
+  if (!hosts.length) return;
+  const names = hosts.map((h) => `'${h}'`).join(", ");
+  const script = `python3 - <<'PY'\nimport re\np="/etc/hosts"\ns=open(p).read()\ns=re.sub(r"# whitehat-task-begin\\n.*?# whitehat-task-end\\n?", "", s, flags=re.S)\nns=[${names}]\nkeep=[l for l in s.splitlines() if l.startswith(("127.", "::1")) or not any(h in l.split()[1:] for h in ns)]\nblock="# whitehat-task-begin\\n${m.target} ${hosts.join(" ")}\\n# whitehat-task-end\\n"\nopen(p,"w").write("\\n".join(keep).rstrip()+"\\n"+block)\nprint("whitehat-hosts-ok")\nPY`;
+  await execRaw(sidecar, script, 10_000);
+}
+
+// Смена IP цели (респаун HTB-инстанса с новым адресом, ручная правка в диалоге задачи): разнести
+// новый адрес по всем потребителям, а не только в БД. $TARGET и контекст хода читаются из БД на
+// каждую команду и подхватят сами; здесь — живые места: /etc/hosts контейнера и браузера, TASK.md,
+// карточки профиля с host=старый IP и заметка в терминале агента. Уже открытые шеллы и джобы живут
+// со старым env — это честно сказано в заметке.
+export async function applyTargetChange(taskId: string, oldTarget: string, newTarget: string) {
+  if (!newTarget || oldTarget === newTarget) return;
+  if (oldTarget) {
+    try { db.prepare("update profile_items set host=?, updated_at=? where task_id=? and host=?").run(newTarget, Date.now(), taskId, oldTarget); } catch { /* профиль — не критичен */ }
+  }
+  try { ensureWorkspace(taskId); } catch { /* TASK.md обновится на следующем ensure */ }
+  agentNote(taskId, oldTarget
+    ? `IP цели изменился: ${oldTarget} → ${newTarget} — /etc/hosts, $TARGET, TASK.md и профиль обновлены; в уже открытых шеллах и джобах env старый (переоткрой вкладку или используй новый адрес)`
+    : `IP цели задан: ${newTarget} — /etc/hosts, $TARGET и TASK.md обновлены`);
+  if ((await status(taskId)) !== "running") return;
+  try {
+    const c = docker.getContainer(cname(taskId));
+    const info = await c.inspect();
+    hostsSynced.delete(taskId);
+    await syncHosts(taskId, c, info.Id);
+  } catch { /* hosts подтянется на следующем ensure */ }
+  try {
+    const b = docker.getContainer(browserName(taskId));
+    if ((await b.inspect()).State.Running) await syncBrowserHosts(taskId, b);
+  } catch { /* браузер не запущен — синхронизируется при старте */ }
 }
 
 // ---------- перехватывающий прокси задачи (Caido): анализ HTTP-трафика с родным веб-UI ----------
