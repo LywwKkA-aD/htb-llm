@@ -46,6 +46,10 @@ export const cfg = {
   // Браузерная панель задачи: Selkies-Firefox сайдкаром в netns контейнера (видеострим без VNC-лагов)
   browserImage: process.env.WH_BROWSER_IMAGE ?? "lscr.io/linuxserver/firefox:latest",
   browserPort: 3000,
+  // Перехватывающий прокси задачи (Caido, Burp-аналог с родным веб-UI): бинарь качается сервером
+  // один раз в data/tools и раздаётся задачам копией в /work (не через VPN цели и не пересборкой образа)
+  caidoVersion: process.env.WH_CAIDO_VERSION ?? "0.59.0",
+  caidoPort: 8181,
 
   // Бюджет контекста (токены). Скорость генерации падает от ЗАПОЛНЕННОГО контекста,
   // поэтому держим живую историю короткой, а знания — в памяти задачи и библиотеке.

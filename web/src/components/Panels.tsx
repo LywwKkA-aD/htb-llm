@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Brain, Check, Copy, ExternalLink, FileText, FolderOpen, Globe, Library, Loader2, Network, Pencil, Play, Plus, Square, Trash2, Upload, AlertCircle, ListTodo, X } from "lucide-react";
-import { api, KIND_RU, type BrowserInfo, type Doc, type Memory, type Task, type VpnInfo } from "../api";
+import { api, KIND_RU, type BrowserInfo, type Doc, type Memory, type ProxyInfo, type Task, type VpnInfo } from "../api";
 import { Button, Dot, Field, Input, Modal, Seg, Textarea, cx, useConfirm, useToast } from "../ui";
 
 const SectionTitle = ({ children, testid }: { children: React.ReactNode; testid?: string }) => (
@@ -435,6 +435,97 @@ export function BrowserPanel({ task }: { task: Task }) {
             </Note>
             <div className="flex items-center gap-2 text-[12px] text-dim"><Globe size={13} className="text-accent" /> стрим Selkies (видео, не VNC) — картинка и ввод без характерных VNC-лагов</div>
           </div>}
+    </div>
+  );
+}
+
+// ---------- перехватывающий прокси задачи (Caido) ----------
+export function ProxyPanel({ task }: { task: Task }) {
+  const toast = useToast();
+  const [info, setInfo] = useState<ProxyInfo | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState("");
+  const cur = useRef(task.id);
+  useLayoutEffect(() => { if (cur.current !== task.id) { cur.current = task.id; setInfo(null); } }, [task.id]);
+  const load = useCallback(() => {
+    const id = task.id;
+    return api.proxy(id).then((v) => { if (cur.current === id) setInfo(v); })
+      .catch((e) => { if (cur.current === id) toast("error", e.message); });
+  }, [task.id, toast]);
+  useEffect(() => { void load(); }, [load]);
+  const transient = info?.phase === "installing" || info?.phase === "starting";
+  useEffect(() => {
+    if (!transient) return;
+    const t = setInterval(load, 2000);
+    return () => clearInterval(t);
+  }, [transient, load]);
+  const act = async (a: "start" | "stop") => {
+    setBusy(true);
+    try { const v = await api.proxyAction(task.id, a); if (cur.current === task.id) setInfo(v); }
+    catch (e: any) { toast("error", e.message); }
+    setBusy(false);
+    void load();
+  };
+  const copy = (key: string, text: string) => { void navigator.clipboard?.writeText(text); setCopied(key); setTimeout(() => setCopied(""), 1200); };
+  const running = !!info?.running && !!info.url;
+  return (
+    <div className="flex h-full flex-col" data-testid="proxy-panel">
+      <div className="flex flex-none flex-wrap items-center gap-2.5 px-4 py-3">
+        <Dot state={running ? "ok" : transient ? "mid" : "off"} />
+        <span className="text-[13px] text-fg" data-testid="proxy-status" data-phase={info?.phase ?? "loading"}>
+          {!info ? "проверяю…"
+            : running ? `Caido ${info.version} слушает в контейнере задачи`
+            : info.phase === "installing" ? "ставлю Caido (скачивание сервером, первый запуск)…"
+            : info.phase === "starting" ? "поднимаю Caido…"
+            : info.phase === "error" ? "не поднялся" : "выключен"}
+        </span>
+        <span className="flex-1" />
+        {running && info?.url && (
+          <Button size="sm" variant="ghost" onClick={() => window.open(info.url, "_blank")} data-testid="proxy-open">
+            <ExternalLink size={13} /> отдельной вкладкой
+          </Button>
+        )}
+        {running || transient
+          ? <Button size="sm" variant="danger" disabled={busy} onClick={() => void act("stop")} data-testid="proxy-stop">
+              {busy ? <Loader2 size={13} className="animate-spin" /> : <Square size={12} />} выключить</Button>
+          : <Button size="sm" variant="solid" disabled={busy || !info} onClick={() => void act("start")} data-testid="proxy-start">
+              {busy ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />} включить прокси</Button>}
+      </div>
+      {info?.phase === "error" && info.error && (
+        <div className="mx-4 mb-3 flex-none rounded-[10px] border border-err/40 bg-err/10 px-3 py-2.5 text-[12px] leading-relaxed text-err" data-testid="proxy-error">{info.error}</div>
+      )}
+      {running && info?.url ? (
+        <>
+          <div className="mx-4 mb-3 flex flex-none flex-wrap items-center gap-x-4 gap-y-1.5 rounded-[10px] border border-line bg-surface px-3 py-2 text-[12px] text-dim">
+            <span className="inline-flex items-center gap-1.5">
+              прокси для браузера хоста: <code className="text-accent" data-testid="proxy-url">{info.url.replace(/\/$/, "")}</code>
+              <Button variant="ghost" size="icon-sm" title="скопировать адрес прокси" aria-label="скопировать адрес прокси" onClick={() => copy("host", info.url!.replace(/\/$/, ""))} data-testid="proxy-copy-host">
+                {copied === "host" ? <Check size={12} /> : <Copy size={12} />}
+              </Button>
+            </span>
+            {info.lanUrl && (
+              <span className="inline-flex items-center gap-1.5">
+                для Firefox во вкладке «Браузер»: <code className="text-fg-2" data-testid="proxy-lan-url">{info.lanUrl.replace(/\/$/, "")}</code>
+                <Button variant="ghost" size="icon-sm" title="скопировать адрес для встроенного Firefox" aria-label="скопировать адрес для встроенного Firefox" onClick={() => copy("lan", info.lanUrl!.replace(/\/$/, ""))} data-testid="proxy-copy-lan">
+                  {copied === "lan" ? <Check size={12} /> : <Copy size={12} />}
+                </Button>
+              </span>
+            )}
+            <span>При первом открытии создай проект в Caido — без него трафик не пойдёт. Для HTTPS поставь CA Caido в браузер (в интерфейсе: Settings → CA Certificate).</span>
+          </div>
+          <iframe key={info.url} src={info.url} title="Caido задачи" className="min-h-0 w-full flex-1 border-t border-line bg-black" data-testid="proxy-frame" allow="clipboard-read; clipboard-write; fullscreen" />
+        </>
+      ) : (
+        <div className="px-4 pb-4">
+          <Note>
+            Caido — перехватывающий прокси уровня Burp с родным веб-интерфейсом: история запросов, перехват,
+            Repeater и Intruder прямо здесь, без стрима рабочего стола. Процесс работает в контейнере задачи:
+            трафик через него идёт в сеть цели через VPN задачи. Встроенный Firefox (вкладка «Браузер») настраивается
+            на адрес прокси внутри контейнера, твой браузер на хосте — на опубликованный 127.0.0.1. Проекты и CA
+            хранятся в /work задачи; аккаунт Caido не нужен (гостевой режим, порт только на 127.0.0.1 хоста).
+          </Note>
+        </div>
+      )}
     </div>
   );
 }

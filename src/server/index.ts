@@ -578,6 +578,20 @@ app.post("/api/tasks/:id/browser/:action", wrap(async (req) => {
   throw new Error("неизвестное действие");
 }));
 
+// ---------- перехватывающий прокси задачи (Caido) ----------
+app.get("/api/tasks/:id/proxy", wrap(async (req) => {
+  const id = P(req, "id");
+  if (!taskExists(id)) throw new HttpError(404, "нет такой задачи");
+  return sandbox.proxyStatus(id);
+}));
+app.post("/api/tasks/:id/proxy/:action", wrap(async (req) => {
+  const id = P(req, "id"), a = P(req, "action");
+  if (!taskExists(id)) throw new HttpError(404, "нет такой задачи");
+  if (a === "start") return sandbox.startProxy(id);
+  if (a === "stop") return sandbox.stopProxy(id);
+  throw new Error("неизвестное действие");
+}));
+
 // ---------- статика (собранный интерфейс) ----------
 // WH_WEB_DIST — собрать интерфейс в свой каталог (параллельные e2e-прогоны с разными сборками не мешают друг другу)
 const dist = process.env.WH_WEB_DIST || path.join(ROOT, "web", "dist");

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Brain, Briefcase, Crosshair, FolderOpen, Globe, Library, ListTodo, Loader2, Network, Play, Plus, RotateCcw, Search, Square, SquareTerminal, BookOpen, ShieldCheck, Wifi } from "lucide-react";
+import { ArrowLeftRight, Brain, Briefcase, Crosshair, FolderOpen, Globe, Library, ListTodo, Loader2, Network, Play, Plus, RotateCcw, Search, Square, SquareTerminal, BookOpen, ShieldCheck, Wifi } from "lucide-react";
 import { api, isGone, sleep, type Chat, type Health, type Task, type VpnInfo } from "./api";
 import { Sidebar } from "./components/Sidebar";
 import { ChatView, type TurnStats } from "./components/Chat";
 import { Terminals } from "./components/Terminals";
-import { BrowserPanel, LibraryPanel, MemoryPanel, TaskDialog, VpnPanel } from "./components/Panels";
+import { BrowserPanel, LibraryPanel, MemoryPanel, ProxyPanel, TaskDialog, VpnPanel } from "./components/Panels";
 import { JobsPanel } from "./components/Jobs";
 import { FilesPanel } from "./components/Files";
 import { PlanPanel } from "./components/Plan";
@@ -16,7 +16,7 @@ const ls = {
   get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } },
   set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* ignore */ } },
 };
-type Tab = "term" | "mem" | "lib" | "jobs" | "files" | "plan" | "target" | "vpn" | "browser";
+type Tab = "term" | "mem" | "lib" | "jobs" | "files" | "plan" | "target" | "vpn" | "browser" | "proxy";
 
 export function Root() {
   return (
@@ -401,6 +401,7 @@ function App() {
                   { value: "target", title: "профиль цели: сервисы, креды, доступы", label: <><Crosshair size={13} className="flex-none" /> <span className="sr-only @[720px]:not-sr-only">цель</span> {!!task.profile_total && <span className="sr-only text-[11px] opacity-60 @[720px]:not-sr-only" data-testid="tab-profile-count">{task.profile_total}</span>}</> },
                   { value: "vpn", title: vpnIp ? `VPN: ${vpnIp}` : "VPN в контейнере (HTB)", label: <><Network size={13} className="flex-none" /> <span className="sr-only @[720px]:not-sr-only">vpn</span>{vpnIp && <Dot state="ok" testid="tab-vpn-dot" />}</> },
                   { value: "browser", title: "Firefox в контейнере задачи (веб цели через VPN)", label: <><Globe size={13} className="flex-none" /> <span className="sr-only @[720px]:not-sr-only">браузер</span></> },
+                  { value: "proxy", title: "Caido: перехватывающий прокси и анализ трафика", label: <><ArrowLeftRight size={13} className="flex-none" /> <span className="sr-only @[720px]:not-sr-only">прокси</span></> },
                 ]}
               />
               <span className="flex-1" />
@@ -413,7 +414,7 @@ function App() {
                 <Button variant="ghost" size="icon-sm" title="пересоздать контейнер (файлы /work сохранятся)" onClick={() => void containerAct("reset")} data-testid="container-reset"><RotateCcw size={13} /></Button>
               </div>
             </div>
-            <div className={cx("min-h-0 flex-1 rounded-b-lg", tab === "term" || tab === "browser" ? "overflow-hidden" : "overflow-y-auto")} data-testid={`tabbody-${tab}`}>
+            <div className={cx("min-h-0 flex-1 rounded-b-lg", tab === "term" || tab === "browser" || tab === "proxy" ? "overflow-hidden" : "overflow-y-auto")} data-testid={`tabbody-${tab}`}>
               {tab === "term" && <Terminals key={task.id} taskId={task.id} />}
               {tab === "mem" && <MemoryPanel task={task} version={memVersion} onChanged={refresh} />}
               {tab === "lib" && <LibraryPanel task={task} />}
@@ -423,6 +424,7 @@ function App() {
               {tab === "target" && <ProfilePanel key={task.id} task={task} onChanged={() => void loadTasks(true).catch(() => {})} />}
               {tab === "vpn" && <VpnPanel task={task} onChanged={onVpn} />}
               {tab === "browser" && <BrowserPanel key={task.id} task={task} />}
+              {tab === "proxy" && <ProxyPanel key={task.id} task={task} />}
             </div>
           </Panel>
         )}

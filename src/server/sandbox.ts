@@ -6,9 +6,9 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { EventEmitter } from "node:events";
-import { PassThrough } from "node:stream";
+import { PassThrough, Readable } from "node:stream";
 import { spawnSync } from "node:child_process";
-import { finished } from "node:stream/promises";
+import { finished, pipeline } from "node:stream/promises";
 import { cfg, paths, DATA, hostPath, safeTask } from "./config.ts";
 import { db } from "./db.ts";
 
@@ -409,14 +409,15 @@ async function ensureOnce(taskId: string) {
     Cmd: ["sleep", "infinity"],
     Env: ["TERM=xterm-256color", "LANG=C.UTF-8"],
     Labels: { "whitehat.task": taskId, "whitehat.data": DATA }, // по метке data тесты убирают только свои контейнеры
-    // SOCKS и панель встроенного браузера публикуются сразу в спеке: bridge-IP из Docker Desktop не маршрутизируется
-    ExposedPorts: { [`${cfg.socksPort}/tcp`]: {}, [`${cfg.browserPort}/tcp`]: {} },
+    // SOCKS, панель браузера и прокси Caido публикуются сразу в спеке: bridge-IP из Docker Desktop не маршрутизируется
+    ExposedPorts: { [`${cfg.socksPort}/tcp`]: {}, [`${cfg.browserPort}/tcp`]: {}, [`${cfg.caidoPort}/tcp`]: {} },
     HostConfig: {
       Binds: [`${hostPath(work)}:/work`], // daemon видит хостовый путь; внутри app-контейнера DATA может быть /data
       NetworkMode: SANDBOX_NET, // изолированная сеть: интернет есть, соседних задач и сервисов на docker0 нет
       PortBindings: {
         [`${cfg.socksPort}/tcp`]: [{ HostIp: "127.0.0.1", HostPort: "" }],
         [`${cfg.browserPort}/tcp`]: [{ HostIp: "127.0.0.1", HostPort: "" }],
+        [`${cfg.caidoPort}/tcp`]: [{ HostIp: "127.0.0.1", HostPort: "" }],
       },
       // /dev/net/tun: OpenVPN внутри контейнера (HTB), ligolo и прочие туннели. НЕ проброс хостового
       // устройства: сервер может жить в app-контейнере без /dev/net/tun, а демон — в VM Docker Desktop,
@@ -486,6 +487,7 @@ export async function destroy(taskId: string) {
   }
   await removeBrowser(taskId);
   browserPhase.delete(taskId);
+  proxyPhase.delete(taskId);
   try { await docker.getContainer(cname(taskId)).remove({ force: true }); } catch { /* уже нет */ }
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { console.warn("[destroy] rm:", (e as Error).message); }
   buses.delete(taskId);
@@ -498,6 +500,7 @@ export async function destroy(taskId: string) {
 export async function reset(taskId: string) {
   await removeBrowser(taskId); // сайдкар браузера жил в netns старого контейнера
   browserPhase.delete(taskId);
+  proxyPhase.delete(taskId); // процесс Caido жил в старом контейнере (данные в /work целы)
   hostsSynced.delete(taskId);
   vpnCache.delete(taskId); // туннель жил в старом контейнере; конфиг в /work останется, подключится заново из вкладки VPN
   try { await docker.getContainer(cname(taskId)).remove({ force: true }); } catch { /* ignore */ }
@@ -1796,4 +1799,143 @@ async function syncBrowserHosts(taskId: string, sidecar: Docker.Container) {
     l && !l.startsWith("#") && !/^127\.|^::1|^fe00|^ff00/.test(l));
   if (!lines.length) return;
   await execRaw(sidecar, lines.map((l) => `grep -qxF ${shq(l)} /etc/hosts || echo ${shq(l)} >> /etc/hosts`).join("\n"), 10_000);
+}
+
+// ---------- перехватывающий прокси задачи (Caido): анализ HTTP-трафика с родным веб-UI ----------
+// Caido — современный Burp-аналог, чей интерфейс изначально веб (без пиксельного стрима и лагов):
+// история запросов, перехват, Repeater/Intruder — панелью в приложении. Процесс живёт в контейнере
+// задачи и слушает только её eth0-адрес (как microsocks): со стороны VPN-туннеля прокси не виден,
+// хост ходит через опубликованный 127.0.0.1-порт, встроенный Firefox — по eth0-адресу (общий netns).
+// Гостевой режим без аккаунта Caido; проекты и CA лежат в /work/.whitehat/caido-data задачи.
+// До выбора проекта в UI прокси отвечает страницей «select a project» — проект создаётся один раз.
+export type ProxyPhase = "stopped" | "installing" | "starting" | "running" | "error";
+export type ProxyStatus = { running: boolean; phase: ProxyPhase; url?: string; lanUrl?: string; error?: string; version: string };
+const PROXY_RT = "/tmp/whitehat-proxy";
+const PROXY_BIN = "/work/.whitehat/caido/caido-cli";
+const PROXY_DATA = "/work/.whitehat/caido-data";
+const proxyPhase = new Map<string, { phase: ProxyPhase; error?: string }>();
+
+async function proxyUrls(taskId: string): Promise<{ url?: string; lanUrl?: string }> {
+  const ip = await containerIp(taskId);
+  const lanUrl = ip ? `http://${ip}:${cfg.caidoPort}/` : undefined;
+  const pub = await publishedPort(taskId, cfg.caidoPort);
+  return { url: pub ? `http://127.0.0.1:${pub}/` : lanUrl, lanUrl };
+}
+
+const PROXY_ALIVE_SH = `p=$(cat ${PROXY_RT}/pid 2>/dev/null); case "$p" in ''|*[!0-9]*) ;; *) kill -0 "$p" 2>/dev/null && echo WHPROXY ;; esac`;
+
+export async function proxyStatus(taskId: string): Promise<ProxyStatus> {
+  const st = proxyPhase.get(taskId);
+  if (st?.phase === "installing" || st?.phase === "starting")
+    return { running: false, phase: st.phase, version: cfg.caidoVersion };
+  let running = false;
+  if ((await status(taskId)) === "running") {
+    const out = await execCollect(taskId, PROXY_ALIVE_SH, 10).then((r) => r.output).catch(() => "");
+    running = out.includes("WHPROXY");
+  }
+  if (running) return { running, phase: "running", ...(await proxyUrls(taskId)), version: cfg.caidoVersion };
+  if (st?.phase === "error") return { running, phase: "error", error: st.error, version: cfg.caidoVersion };
+  return { running, phase: "stopped", version: cfg.caidoVersion };
+}
+
+export const stopProxy = (taskId: string) => withVpnLock(taskId, async (): Promise<ProxyStatus> => {
+  if ((await status(taskId)) === "running") {
+    const script = [
+      `p=$(cat ${PROXY_RT}/pid 2>/dev/null); case "$p" in ''|*[!0-9]*) p= ;; esac`,
+      `[ -n "$p" ] && kill -TERM "$p" 2>/dev/null`,
+      `for i in $(seq 1 30); do [ -n "$p" ] && kill -0 "$p" 2>/dev/null || break; sleep 0.1; done`,
+      `[ -n "$p" ] && kill -KILL "$p" 2>/dev/null`,
+      `rm -f ${PROXY_RT}/pid; true`,
+    ].join("\n");
+    await execCollect(taskId, script, 15).catch(() => {});
+  }
+  proxyPhase.delete(taskId);
+  agentNote(taskId, "Прокси (Caido): остановлен");
+  return proxyStatus(taskId);
+});
+
+export const startProxy = (taskId: string) => withVpnLock(taskId, async (): Promise<ProxyStatus> => {
+  const cur = proxyPhase.get(taskId);
+  if (cur?.phase === "installing" || cur?.phase === "starting") return proxyStatus(taskId);
+  const st = await proxyStatus(taskId);
+  if (st.running) return st;
+  proxyPhase.set(taskId, { phase: "starting" });
+  void runProxyStart(taskId).catch((e) => {
+    proxyPhase.set(taskId, { phase: "error", error: String((e as Error)?.message ?? e) });
+    agentNote(taskId, `Прокси (Caido): не поднялся — ${String((e as Error)?.message ?? e)}`);
+  });
+  return { running: false, phase: "starting", version: cfg.caidoVersion };
+});
+
+// Бинарь Caido качает сервер (не контейнер: его интернет может идти через VPN цели) один раз на
+// установку в data/tools, дальше задачам — копия в /work. Архитектура — серверная = контейнерная.
+let caidoCachePromise: Promise<string> | null = null;
+function ensureCaidoCacheBin(taskId: string): Promise<string> {
+  const cacheDir = path.join(DATA, "tools", `caido-v${cfg.caidoVersion}`);
+  const cacheBin = path.join(cacheDir, "caido-cli");
+  if (fs.existsSync(cacheBin)) return Promise.resolve(cacheBin);
+  caidoCachePromise ??= (async () => {
+    const arch = process.arch === "arm64" ? "aarch64" : "x86_64";
+    const url = `https://caido.download/releases/v${cfg.caidoVersion}/caido-cli-v${cfg.caidoVersion}-linux-${arch}.tar.gz`;
+    fs.mkdirSync(cacheDir, { recursive: true });
+    const tgz = path.join(cacheDir, "caido-cli.tar.gz");
+    const res = await fetch(url, { signal: AbortSignal.timeout(300_000) });
+    if (!res.ok || !res.body) throw new Error(`скачивание Caido: HTTP ${res.status} (${url})`);
+    await pipeline(Readable.fromWeb(res.body as any), fs.createWriteStream(tgz));
+    const t = spawnSync("tar", ["xzf", tgz, "-C", cacheDir], { encoding: "utf8" });
+    if (t.status !== 0) throw new Error(`распаковка Caido не удалась: ${String(t.stderr ?? "").slice(0, 200)}`);
+    if (!fs.existsSync(cacheBin)) throw new Error("в архиве Caido нет caido-cli — проверь WH_CAIDO_VERSION");
+    return cacheBin;
+  })().catch((e) => { caidoCachePromise = null; throw e; });
+  void taskId;
+  return caidoCachePromise;
+}
+
+async function runProxyStart(taskId: string) {
+  await ensure(taskId);
+  try {
+    const info = await docker.getContainer(cname(taskId)).inspect();
+    if (!specHasPort(info, cfg.caidoPort) && (await isDockerDesktop())) {
+      agentNote(taskId, "Прокси: контейнер создан старой версией без опубликованного порта Caido — пересоздаю его (файлы /work сохранятся, VPN нужно подключить заново)…");
+      await reset(taskId);
+    }
+  } catch { /* дальше как обычно: на Linux панель доступна по bridge-адресу */ }
+
+  const workBinHost = path.join(paths.taskWork(taskId), ".whitehat", "caido", "caido-cli");
+  if (!fs.existsSync(workBinHost)) {
+    proxyPhase.set(taskId, { phase: "installing" });
+    agentNote(taskId, `Прокси: ставлю Caido ${cfg.caidoVersion} (первый запуск — скачивание ~50 МБ сервером)…`);
+    const cacheBin = await ensureCaidoCacheBin(taskId);
+    fs.mkdirSync(path.dirname(workBinHost), { recursive: true });
+    fs.copyFileSync(cacheBin, workBinHost);
+    fs.chmodSync(workBinHost, 0o755);
+  }
+  try { fs.mkdirSync(path.join(paths.taskWork(taskId), ".whitehat", "caido-data"), { recursive: true }); } catch { /* создаст сам Caido */ }
+
+  proxyPhase.set(taskId, { phase: "starting" });
+  const ip = await containerIp(taskId);
+  if (!ip || !/^\d+\.\d+\.\d+\.\d+$/.test(ip)) throw new Error("не нашёл IP контейнера в сети песочниц");
+  const script = [
+    `mkdir -p ${PROXY_RT} ${PROXY_DATA}`,
+    `p=$(cat ${PROXY_RT}/pid 2>/dev/null); case "$p" in ''|*[!0-9]*) p= ;; esac; [ -n "$p" ] && kill -0 "$p" 2>/dev/null && { echo WHALREADY; exit 0; }`,
+    `nohup ${PROXY_BIN} --listen ${ip}:${cfg.caidoPort} --allow-guests --no-open --no-sync --data-path ${PROXY_DATA} </dev/null >${PROXY_RT}/caido.log 2>&1 & echo $! > ${PROXY_RT}/pid`,
+    `echo WHSTARTED`,
+  ].join("\n");
+  await execCollect(taskId, script, 20);
+  const deadline = Date.now() + 120_000;
+  let ok = 0;
+  for (;;) {
+    const out = await execCollect(taskId, `curl -s -o /dev/null -w '%{http_code}' --max-time 3 http://${ip}:${cfg.caidoPort}/ 2>/dev/null || echo 000`, 10)
+      .then((r) => r.output).catch(() => "");
+    ok = out.includes("200") ? ok + 1 : 0;
+    if (ok >= 2) break;
+    if (Date.now() > deadline) {
+      const tail = await execCollect(taskId, `tail -n 15 ${PROXY_RT}/caido.log 2>/dev/null`, 10).then((r) => r.output.trim()).catch(() => "");
+      throw new Error(`Caido не ответил за 2 минуты${tail ? ` — хвост лога: ${tail.slice(-400)}` : ""}`);
+    }
+    await sleep(1500);
+  }
+  proxyPhase.set(taskId, { phase: "running" });
+  const u = await proxyUrls(taskId);
+  agentNote(taskId, `Прокси (Caido): поднят — панель «Прокси» (${u.url ?? u.lanUrl ?? ""}); при первом открытии создай проект в интерфейсе, без него прокси не пропускает трафик`);
 }

@@ -45,7 +45,7 @@ export async function waitContainer(request: APIRequestContext, taskId: string, 
 // Раньше: goto → evaluate → reload, и автоматический выбор задачи приложением мог перезаписать wh.task
 // между evaluate и reload — тест молча открывал не ту задачу.
 let openSeq = 0;
-export async function openTask(page: Page, ids: Ids | { task: { id: string }; chat?: { id: string } }, opts: { tab?: "term" | "mem" | "lib" | "vpn" | "browser" } = {}) {
+export async function openTask(page: Page, ids: Ids | { task: { id: string }; chat?: { id: string } }, opts: { tab?: "term" | "mem" | "lib" | "vpn" | "browser" | "proxy" } = {}) {
   const key = `__wh_open_${++openSeq}`;
   await page.addInitScript(([k, t, c, tab]) => {
     if (sessionStorage.getItem(k)) return; // последующие перезагрузки в тесте сохраняют то, что выбрал тест/пользователь
