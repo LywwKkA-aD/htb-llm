@@ -335,7 +335,26 @@ test.describe("инструменты и терминалы (настоящий 
     await expect(out).not.toContainText("3008;");
   });
 
-  test("твой shell: выделение мышью копируется Ctrl+C в буфер, Ctrl+Shift+V вставляет обратно", async ({ page }) => {
+  test("твой shell: колесо мыши только скроллит вывод, а не листает историю команд", async ({ page }) => {
+    await expect(page.getByTestId("term-shell")).toHaveAttribute("data-ws", "open");
+    await expect.poll(() => termText(page, "shell"), { timeout: 15_000 }).toMatch(/root@task-\w+/);
+    const term = page.getByTestId("term-shell");
+    await term.locator(".xterm-helper-textarea").focus();
+    await page.keyboard.type("for i in $(seq 1 60); do echo WHEEL-LINE-$i; done");
+    await page.keyboard.press("Enter");
+    await expect.poll(() => termText(page, "shell")).toContain("WHEEL-LINE-60");
+    // частично набранная команда: уйди колесо в bash стрелками — её заменит прошлая команда из истории
+    await page.keyboard.type("echo WHEEL-PARTIAL");
+    const b = (await term.boundingBox())!;
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+    for (let i = 0; i < 20; i++) await page.mouse.wheel(0, -600);
+    await expect.poll(() => termText(page, "shell"), { timeout: 5_000 }).toContain("WHEEL-LINE-2");
+    for (let i = 0; i < 20; i++) await page.mouse.wheel(0, 600);
+    await expect.poll(() => termText(page, "shell"), { timeout: 5_000 }).toContain("echo WHEEL-PARTIAL");
+    await page.keyboard.press("Control+u");
+  });
+
+  test("твой shell: выделение мышью копируется в буфер браузера (tmux + OSC 52), Ctrl+Shift+V вставляет обратно", async ({ page }) => {
     await expect(page.getByTestId("term-shell")).toHaveAttribute("data-ws", "open");
     await expect.poll(() => termText(page, "shell"), { timeout: 15_000 }).toMatch(/root@task-\w+/);
     const term = page.getByTestId("term-shell");
@@ -343,16 +362,15 @@ test.describe("инструменты и терминалы (настоящий 
     await page.keyboard.type("echo COPY-ME-e2e-$((40+2))");
     await page.keyboard.press("Enter");
     await expect.poll(() => termText(page, "shell")).toContain("COPY-ME-e2e-42");
-    // выделение обычным протягиванием мыши по экрану терминала (tmux mouse выключена — выделяет xterm).
-    // В свежей сессии вывод вверху экрана, низ пуст — тянем через весь видимый экран по диагонали.
+    // выделение обычным протягиванием мыши: tmux (mouse on) копирует при отпускании кнопки и шлёт
+    // OSC 52, xterm-обработчик кладёт текст в буфер браузера — Ctrl+C не нужен.
     const box = await term.locator(".xterm-screen").boundingBox();
     expect(box, "экран терминала виден").toBeTruthy();
     await page.mouse.move(box!.x + 6, box!.y + 6);
     await page.mouse.down();
     await page.mouse.move(box!.x + box!.width - 6, box!.y + box!.height - 6, { steps: 16 });
     await page.mouse.up();
-    await page.keyboard.press("Control+c");
-    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain("COPY-ME-e2e-42");
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText()), { timeout: 10_000 }).toContain("COPY-ME-e2e-42");
     // вставка обратно тем же терминалом: Ctrl+Shift+V + Enter выполняет вставленную команду
     await page.evaluate(() => navigator.clipboard.writeText("echo PASTED-E2E-OK"));
     await term.locator(".xterm-helper-textarea").focus();

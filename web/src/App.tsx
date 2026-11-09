@@ -356,7 +356,7 @@ function App() {
       >
         <Panel className="relative" data-testid="main-panel">
           {task && chat ? (
-            <ChatView key={`${task.id}:${chat.id}`} task={task} chat={chat} ctxWindow={health?.ctxWindow ?? 65536} reasoning={health?.reasoning ?? null} memVersion={memVersion}
+            <ChatView key={`${task.id}:${chat.id}`} task={task} chat={chat} ctxWindow={health?.ctxWindow ?? 65536} compactAt={health?.compactAt} reasoning={health?.reasoning ?? null} memVersion={memVersion}
               onChanged={refresh} onGone={onGone} onEditTask={() => setDialog("edit")} onStats={setStats}
               takeDraft={() => { const d = pendingDraft.current; pendingDraft.current = null; return d && d.task === task.id ? { text: d.text, images: d.images } : null; }} />
           ) : task && !chatsReady ? (

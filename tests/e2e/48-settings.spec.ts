@@ -69,6 +69,22 @@ test.describe("общие настройки моделей", () => {
     expect(back).toMatchObject({ model: "Qwen3.8-27B-Turbo", preset: "local" });
   });
 
+  test("граница сворачивания compactAt: своя у пресета, валидируется и видна в health", async ({ request }) => {
+    expect((await request.put("/api/settings", { data: { llm: { custom: { compactAt: 100 } } } })).status()).toBe(400);
+    const put = await request.put("/api/settings", {
+      data: { llm: { active: "custom", custom: { url: MOCK_V1, model: "z-ai/glm-5.3-flash", ctxWindow: 131072, compactAt: 90000 } } },
+    });
+    expect(put.ok(), await put.text()).toBeTruthy();
+    expect((await put.json()).llm.custom.compactAt).toBe(90000);
+    // явная граница пресета важнее тестового env WH_COMPACT_AT
+    expect(await (await request.get("/api/health")).json()).toMatchObject({ ctxWindow: 131072, compactAt: 90000 });
+    // граница выше окна при применении прижимается к окну минус запас
+    await request.put("/api/settings", { data: { llm: { custom: { compactAt: 200000 } } } });
+    expect((await (await request.get("/api/health")).json()).compactAt).toBe(131072 - 4096);
+    await request.put("/api/settings", { data: { llm: { custom: { compactAt: 0 } } } });
+    await restore(request);
+  });
+
   test("OpenRouter: роутинг провайдера и квантизация попадают в тело запроса", async ({ request, page }) => {
     const put = await request.put("/api/settings", {
       data: { llm: { active: "openrouter", openrouter: { url: MOCK_V1, model: "z-ai/glm-5.3-flash", provider: "relace, together", quantization: "fp4" } } },
@@ -104,6 +120,7 @@ test.describe("общие настройки моделей", () => {
     await expect(page.getByTestId("set-llm-model")).toHaveValue("z-ai/glm-5.3-flash");
     await expect(page.getByTestId("set-llm-provider")).toHaveValue("relace");
     await expect(page.getByTestId("set-llm-quant")).toHaveValue("fp4");
+    await expect(page.getByTestId("set-llm-compact")).toHaveValue(""); // 0 = авто показывается пустым полем
     // направляем пресет на мок, чтобы проверка и ход остались локальными
     await page.getByTestId("set-llm-url").fill(MOCK_V1);
     await page.getByTestId("set-llm-test").click();

@@ -8,11 +8,12 @@ import { Md } from "./Markdown";
 import { MemCard } from "./Panels"; // одна карточка памяти на чат и панель (правка, проверка, «отмена»)
 import { Button, Chip, Kbd, Seg, cx, useToast } from "../ui";
 
+// Запасной порог сворачивания, пока health не пришёл; рабочее значение сервер отдаёт в health.compactAt
 export const COMPACT_AT = 32000;
 export type TurnStats = { promptTokens: number; tps?: number; draftAccept?: number | null; busy: boolean };
 
 type Props = {
-  task: Task; chat: TChat; ctxWindow: number; reasoning?: ReasoningInfo | null;
+  task: Task; chat: TChat; ctxWindow: number; compactAt?: number; reasoning?: ReasoningInfo | null;
   memVersion: number; // растёт, когда память задачи меняется вне чата (панель памяти, конец хода)
   onChanged: () => void; onGone: (draft?: { text: string; images: string[] }) => void; onEditTask: () => void; onStats: (s: TurnStats) => void;
   takeDraft?: () => { text: string; images: string[] } | null; // черновик, перенесённый из удалённого чата (App → новому экрану)
@@ -40,7 +41,8 @@ const SUGGESTIONS = [
   { k: "протоколы", t: "Как работает ARP? Найди в материалах и покажи на практике в песочнице" },
 ];
 
-export function ChatView({ task, chat, ctxWindow, reasoning, memVersion, onChanged, onGone, onEditTask, onStats, takeDraft }: Props) {
+export function ChatView({ task, chat, ctxWindow, compactAt, reasoning, memVersion, onChanged, onGone, onEditTask, onStats, takeDraft }: Props) {
+  const compactMark = compactAt && compactAt > 0 ? compactAt : COMPACT_AT;
   const toast = useToast();
   const [items, setItems] = useState<LogItem[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -372,10 +374,10 @@ export function ChatView({ task, chat, ctxWindow, reasoning, memVersion, onChang
           <span className="text-[11px] whitespace-nowrap text-dim" data-testid="ctx-label">ctx {fmtK(promptTokens)} / {Math.round(ctxWindow / 1024)}K</span>
           <div className="relative h-1.5 w-28 rounded-full border border-line-2 bg-term" data-testid="ctx-meter" data-tokens={promptTokens}>
             <div
-              className={cx("absolute inset-y-0 left-0 rounded-full transition-[width] duration-500", promptTokens > COMPACT_AT ? "bg-warn" : "bg-accent")}
+              className={cx("absolute inset-y-0 left-0 rounded-full transition-[width] duration-500", promptTokens > compactMark ? "bg-warn" : "bg-accent")}
               style={{ width: `${pct}%` }}
             />
-            <div className="absolute -inset-y-1 w-0.5 rounded bg-warn/80" style={{ left: `${(COMPACT_AT / ctxWindow) * 100}%` }} />
+            <div className="absolute -inset-y-1 w-0.5 rounded bg-warn/80" style={{ left: `${Math.min(100, (compactMark / ctxWindow) * 100)}%` }} />
           </div>
         </div>
       </header>

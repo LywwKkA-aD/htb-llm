@@ -29,6 +29,27 @@ function useXterm(kind: "agent" | "shell", taskId: string, sid = 1) {
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(el);
+    // OSC 52 от tmux (set-clipboard on): выделение мышью в shell копирует tmux — кладём в буфер браузера.
+    term.parser.registerOscHandler(52, (data) => {
+      const b64 = data.split(";").slice(1).join(";");
+      if (b64 && b64 !== "?") {
+        try {
+          const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+          void navigator.clipboard.writeText(new TextDecoder().decode(bytes)).catch(() => {});
+        } catch { /* не base64 — игнорируем */ }
+      }
+      return true;
+    });
+    // В терминале агента (не tmux) колесо — только прокрутка scrollback xterm, без стрелок приложению.
+    // В shell колесо не трогаем: его обрабатывает tmux (mouse on — скролл истории pane в copy-mode).
+    if (kind === "agent") term.attachCustomWheelEventHandler((e) => {
+      const n = e.deltaMode === 1 ? e.deltaY
+        : e.deltaMode === 2 ? Math.sign(e.deltaY) * term.rows
+        : Math.max(1, Math.min(10, Math.round(Math.abs(e.deltaY) / 33))) * Math.sign(e.deltaY);
+      term.scrollLines(n);
+      e.preventDefault();
+      return false;
+    });
     const doFit = () => { try { if (el.offsetWidth > 0 && el.offsetHeight > 0) fit.fit(); } catch { /* ignore */ } };
     doFit();
     setState("connecting");

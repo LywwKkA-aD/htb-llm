@@ -12,7 +12,7 @@ import { AIMessage, HumanMessage, ToolMessage, RemoveMessage, isAIMessage, isHum
 import { nanoid } from "nanoid";
 import Database from "better-sqlite3";
 import { cfg, paths, type AgentMode } from "./config.ts";
-import { getSettings, llmCtxWindow, subagentsAvailable } from "./settings.ts";
+import { getSettings, llmCompactAt, llmCtxWindow, subagentsAvailable } from "./settings.ts";
 import { SPAWN_TOOL, runSubagent } from "./subagent.ts";
 import { db, now, type Task, type Chat } from "./db.ts";
 import { chat as llm, approxTokens, clip, type OAMsg, type OAToolCall, type Effort } from "./llm.ts";
@@ -692,7 +692,7 @@ async function proposeNode(state: S, config: LangGraphRunnableConfig) {
 async function compactNode(state: S, config: LangGraphRunnableConfig) {
   const run = runOf(config);
   // после «стоп» пользователь ждёт управление сразу — свернём на следующем ходе
-  if (run.signal.aborted || state.promptTokens < cfg.compactAtPromptTokens) return {};
+  if (run.signal.aborted || state.promptTokens < llmCompactAt()) return {};
   const humans = state.messages.map((m, i) => (isHumanMessage(m) ? i : -1)).filter((i) => i >= 0);
   if (humans.length <= cfg.keepRecentTurns) return {};
   const cut = humans[humans.length - cfg.keepRecentTurns];

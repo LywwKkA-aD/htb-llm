@@ -16,7 +16,7 @@ import * as plan from "./plan.ts";
 import * as profile from "./profile.ts";
 import { runTurn, stopTurn, stopAndWait, isBusy, getChat, deleteChatState } from "./graph.ts";
 import { listServices, startService, stopService, type ServiceId } from "./services.ts";
-import { activeEmbed, activeLlm, publicSettings, saveSettings, testConnection, embedIndexInfo, PRESETS, type Preset } from "./settings.ts";
+import { activeEmbed, activeLlm, llmCompactAt, publicSettings, saveSettings, testConnection, embedIndexInfo, PRESETS, type Preset } from "./settings.ts";
 import { invalidateOrStats, openRouterStats } from "./openrouter.ts";
 import * as htb from "./htb.ts";
 import type { Effort } from "./llm.ts";
@@ -99,7 +99,7 @@ app.get("/api/health", wrap(async () => {
   const act = activeLlm();
   const emb = activeEmbed();
   const reasoning = await activeReasoningInfo(act).catch(() => null);
-  return { ...h, docker: dockerOk, image, model: act.model, ctxWindow: act.ctxWindow || cfg.ctxWindow, preset: act.preset, llmPreset: act.preset, embedPreset: emb.preset, reasoning };
+  return { ...h, docker: dockerOk, image, model: act.model, ctxWindow: act.ctxWindow || cfg.ctxWindow, compactAt: llmCompactAt(), preset: act.preset, llmPreset: act.preset, embedPreset: emb.preset, reasoning };
 }));
 
 // ---------- общие настройки (модель и эмбеддинги: пресеты локальная / OpenRouter / свой API) ----------

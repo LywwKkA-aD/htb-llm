@@ -11,7 +11,8 @@ export const PRESETS: Preset[] = ["local", "openrouter", "custom"];
 export const OPENROUTER_URL = "https://openrouter.ai/api/v1";
 
 export type EndpointCfg = { url: string; model: string; apiKey: string; provider: string; quantization: string };
-export type LlmCfg = EndpointCfg & { ctxWindow: number };
+// compactAt — граница сворачивания истории в резюме (prompt-токены), своя у каждого пресета; 0 = авто.
+export type LlmCfg = EndpointCfg & { ctxWindow: number; compactAt: number };
 export type Section<T extends EndpointCfg> = { active: Preset } & Record<Preset, T>;
 // Подагенты (spawn_subagent): делегирование подзадач отдельной модели с чистым контекстом.
 // Доступны только на внешних пресетах — локальная Qwen одна, и параллельные ходы ей вредят.
@@ -28,9 +29,9 @@ export function defaultSettings(): AppSettings {
   return {
     llm: {
       active: "local",
-      local: { ...ep(cfg.llmUrl, cfg.llmModel), ctxWindow: cfg.ctxWindow },
-      openrouter: { ...ep(OPENROUTER_URL, "z-ai/glm-5.3-flash", { provider: "relace", quantization: "fp4" }), ctxWindow: 131072 },
-      custom: { ...ep("", ""), ctxWindow: cfg.ctxWindow },
+      local: { ...ep(cfg.llmUrl, cfg.llmModel), ctxWindow: cfg.ctxWindow, compactAt: 0 },
+      openrouter: { ...ep(OPENROUTER_URL, "z-ai/glm-5.3-flash", { provider: "relace", quantization: "fp4" }), ctxWindow: 131072, compactAt: 0 },
+      custom: { ...ep("", ""), ctxWindow: cfg.ctxWindow, compactAt: 0 },
     },
     embed: {
       active: "local",
@@ -85,6 +86,20 @@ export const activeEmbed = (): EndpointCfg & { preset: Preset } => {
 };
 export const llmCtxWindow = (): number => activeLlm().ctxWindow || cfg.ctxWindow;
 
+// Авто-граница сворачивания по окну: малым окнам (локальная Qwen 64K) — прежние 32K
+// (скорость падает от заполненного контекста), большим — окно минус запас на системный
+// промпт, резюме и ответ. Явная настройка пресета (compactAt > 0) важнее авто и env.
+export const autoCompactAt = (win: number): number =>
+  win <= 65536 ? Math.min(cfg.compactAtPromptTokens, Math.max(4096, win - 2048)) : win - 24576;
+
+export const llmCompactAt = (): number => {
+  const a = activeLlm();
+  const win = a.ctxWindow || cfg.ctxWindow;
+  if (a.compactAt > 0) return Math.min(a.compactAt, Math.max(4096, win - 4096));
+  if (cfg.compactAtEnv != null && Number.isFinite(cfg.compactAtEnv)) return cfg.compactAtEnv;
+  return autoCompactAt(win);
+};
+
 // ---------- валидация и сохранение ----------
 const cleanUrl = (v: unknown, field: string): string => {
   const s = String(v ?? "").trim().replace(/\/+$/, "");
@@ -129,6 +144,10 @@ function cleanSection<T extends EndpointCfg>(raw: any, prev: Section<T>, label: 
       (cleaned as unknown as LlmCfg).ctxWindow = c !== undefined
         ? (() => { const n = Math.floor(Number(c)); if (!Number.isFinite(n) || n < 8192 || n > 1_048_576) throw new Error(`${label}/${p}: окно контекста — число от 8192 до 1048576`); return n; })()
         : prevCtx;
+      const ca = raw[p]?.compactAt;
+      (cleaned as unknown as LlmCfg).compactAt = ca !== undefined
+        ? (() => { const n = Math.floor(Number(ca)); if (!Number.isFinite(n) || (n !== 0 && (n < 4096 || n > 1_048_576))) throw new Error(`${label}/${p}: граница сворачивания — 0 (авто) или число от 4096 до 1048576`); return n; })()
+        : ((prev[p] as unknown as LlmCfg).compactAt ?? 0);
     }
     out[p] = cleaned;
   }
@@ -179,7 +198,7 @@ export function saveSettings(patch: { llm?: unknown; embed?: unknown; agents?: u
 // ---------- публичный вид (без ключей) ----------
 type PublicEp = Omit<EndpointCfg, "apiKey"> & { apiKeySet: boolean };
 type PublicSection<T> = { active: Preset } & Record<Preset, T>;
-export type PublicSettings = { llm: PublicSection<PublicEp & { ctxWindow: number }>; embed: PublicSection<PublicEp>; agents: AgentsSettings; openrouterMgmt: { apiKeySet: boolean } };
+export type PublicSettings = { llm: PublicSection<PublicEp & { ctxWindow: number; compactAt: number }>; embed: PublicSection<PublicEp>; agents: AgentsSettings; openrouterMgmt: { apiKeySet: boolean } };
 
 export function publicSettings(s: AppSettings = getSettings()): PublicSettings {
   const pub = <T extends EndpointCfg>(sec: Section<T>) => {

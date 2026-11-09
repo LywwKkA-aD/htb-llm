@@ -47,7 +47,9 @@ export const cfg = {
   // Бюджет контекста (токены). Скорость генерации падает от ЗАПОЛНЕННОГО контекста,
   // поэтому держим живую историю короткой, а знания — в памяти задачи и библиотеке.
   ctxWindow: 65536,
-  compactAtPromptTokens: Number(process.env.WH_COMPACT_AT ?? 32000), // после хода: свернуть старое в резюме (половина окна 64K)
+  compactAtPromptTokens: Number(process.env.WH_COMPACT_AT ?? 32000), // дефолт сворачивания для окон ≤64K
+  // Явный env-override порога сворачивания (тесты/отладка). null — решает настройка пресета (compactAt, 0=авто).
+  compactAtEnv: process.env.WH_COMPACT_AT !== undefined ? Number(process.env.WH_COMPACT_AT) : null,
   keepRecentTurns: 2, // столько последних ходов пользователя остаются дословно
   toolOutputChars: 6000, // больше — в контекст идут голова+хвост, полный вывод лежит файлом в /work/.whitehat
   recallMemoryTokens: 1800, // память задачи целиком, пока влезает; иначе топ по смыслу + список заголовков

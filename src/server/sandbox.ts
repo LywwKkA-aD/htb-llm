@@ -1061,15 +1061,22 @@ export function agentNote(taskId: string, text: string) {
 // (перезагрузка страницы, уход на другую панель, рестарт веба) detach-ит клиент, а bash, listener
 // и reverse shell в сессии живут дальше. Сессия умирает от явного закрытия вкладки (killUserShell),
 // exit внутри неё или пересоздания/остановки контейнера.
-// mouse у tmux ВЫКЛЮЧЕНА сознательно: с mouse on терминал отдаёт drag мыши в tmux (его copy-mode),
-// и обычное выделение с копированием в буфер браузера не работает. Скролл при этом — scrollback xterm.
+// Мышь у tmux ВКЛЮЧЕНА: scrollback живёт в tmux (history-limit), колесо крутит его copy-mode —
+// это единственный настоящий скролл, т.к. tmux рисует экран позиционно и в scrollback xterm
+// строки не попадают, а с mouse off xterm в alternate screen превращает колесо в стрелки
+// (bash листает историю команд). Выделение drag'ом при этом делает tmux, а set-clipboard on
+// шлёт скопированное в браузер по OSC 52 (xterm кладёт в navigator.clipboard); Shift+drag —
+// по-прежнему родное выделение xterm с копированием по Ctrl+C.
 export const shellSessionName = (sid: unknown) => `wh-shell-${shellSid(sid)}`;
 export async function openUserShell(taskId: string, sid = 1) {
   const c = await ensure(taskId);
   const env = ["TERM=xterm-256color", "LANG=C.UTF-8", ...vpnEnv(taskId), ...targetEnv(taskId)];
   const envArgs = env.filter((e) => !e.startsWith("TERM=") && !e.startsWith("LANG=")).map((e) => ` -e ${shq(e)}`).join("");
   const sname = shellSessionName(sid);
-  const script = `tmux start-server 2>/dev/null; tmux set -g history-limit 10000 2>/dev/null; tmux has-session -t ${sname} 2>/dev/null || tmux new-session -d -s ${sname} -c /work${envArgs} 'bash -l'; tmux set -t ${sname} status off 2>/dev/null; tmux set -t ${sname} mouse off 2>/dev/null; mkdir -p /work/.whitehat; [ "$(tmux display-message -p -t ${sname} '#{pane_pipe}' 2>/dev/null)" = "1" ] || tmux pipe-pane -t ${sname} 'stdbuf -o0 cat >> /work/.whitehat/shell-${shellSid(sid)}.log' 2>/dev/null; exec tmux attach-session -t ${sname}`;
+  // Порядок важен: голый start-server без сессий сразу завершается (exit-empty), и set -g после него
+  // молча падают. Поэтому опции лежат в конфиге (-f применяется при старте сервера из new-session),
+  // а для уже работающего сервера те же set -g повторяются после создания сессии.
+  const script = `mkdir -p /work/.whitehat; printf '%s\\n' 'set -g history-limit 10000' 'set -g set-clipboard on' > /work/.whitehat/tmux.conf; tmux has-session -t ${sname} 2>/dev/null || tmux -f /work/.whitehat/tmux.conf new-session -d -s ${sname} -c /work${envArgs} 'bash -l'; tmux set -g history-limit 10000 2>/dev/null; tmux set -g set-clipboard on 2>/dev/null; tmux set -t ${sname} status off 2>/dev/null; tmux set -t ${sname} mouse on 2>/dev/null; [ "$(tmux display-message -p -t ${sname} '#{pane_pipe}' 2>/dev/null)" = "1" ] || tmux pipe-pane -t ${sname} 'stdbuf -o0 cat >> /work/.whitehat/shell-${shellSid(sid)}.log' 2>/dev/null; exec tmux attach-session -t ${sname}`;
   let ex: Docker.Exec, stream: NodeJS.ReadWriteStream;
   try {
     ex = await c.exec({
@@ -1148,7 +1155,7 @@ export async function createJob(taskId: string, name: string, command: string): 
     const inner = `${cmd}\n__wh_rc=$?; echo "[whitehat: команда завершилась rc=$__wh_rc; сессия осталась интерактивным shell]"; exec bash -l`;
     const shellCmd = `bash -lc ${shq(inner)}`;
     const sname = jobSessionName(id);
-    const script = `tmux start-server 2>/dev/null; tmux set -g history-limit 10000 2>/dev/null; tmux set -g status off 2>/dev/null; tmux kill-session -t ${sname} 2>/dev/null; tmux new-session -d -s ${sname} -c /work${envArgs} ${shq(shellCmd)} && tmux has-session -t ${sname} && echo whitehat-job-ok`;
+    const script = `mkdir -p /work/.whitehat; printf '%s\\n' 'set -g history-limit 10000' 'set -g set-clipboard on' > /work/.whitehat/tmux.conf; tmux kill-session -t ${sname} 2>/dev/null; tmux -f /work/.whitehat/tmux.conf new-session -d -s ${sname} -c /work${envArgs} ${shq(shellCmd)} && tmux set -g history-limit 10000 2>/dev/null; tmux set -g status off 2>/dev/null; tmux has-session -t ${sname} && echo whitehat-job-ok`;
     const out = await execRaw(c, script, 15_000);
     if (!out.includes("whitehat-job-ok")) throw new Error("tmux не запустил сессию job");
   } catch (e) {

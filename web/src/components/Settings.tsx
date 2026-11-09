@@ -6,7 +6,7 @@ import { Button, Field, Input, Modal, Seg, useConfirm, useToast } from "../ui";
 // Общие настройки моделей: для основной LLM и эмбеддингов — пресет (локальная / OpenRouter /
 // свой OpenAI-совместимый API) со своим адресом, моделью, ключом и роутингом провайдера.
 // Ключ сервер обратно не отдаёт: поле пустое = «не трогать», заполненное = заменить.
-type Draft = { url: string; model: string; apiKey: string; clearKey: boolean; provider: string; quantization: string; ctxWindow: string };
+type Draft = { url: string; model: string; apiKey: string; clearKey: boolean; provider: string; quantization: string; ctxWindow: string; compactAt: string };
 type SectionDraft = { active: Preset } & Record<Preset, Draft>;
 
 const PRESET_LABEL: Record<Preset, string> = { local: "локальная", openrouter: "OpenRouter", custom: "свой API" };
@@ -16,6 +16,7 @@ const toDraft = (s: AppSettings["llm"] | AppSettings["embed"], llm: boolean): Se
     url: s[p].url, model: s[p].model, apiKey: "", clearKey: false,
     provider: s[p].provider, quantization: s[p].quantization,
     ctxWindow: llm ? String((s[p] as { ctxWindow: number }).ctxWindow) : "",
+    compactAt: llm && (s[p] as { compactAt: number }).compactAt > 0 ? String((s[p] as { compactAt: number }).compactAt) : "",
   });
   return { active: s.active, local: one("local"), openrouter: one("openrouter"), custom: one("custom") };
 };
@@ -26,7 +27,7 @@ const toPayload = (d: SectionDraft, llm: boolean) => {
     const base: Record<string, unknown> = { url: x.url, model: x.model, provider: x.provider, quantization: x.quantization };
     if (x.clearKey) base.apiKey = "";
     else if (x.apiKey) base.apiKey = x.apiKey;
-    if (llm) base.ctxWindow = Number(x.ctxWindow);
+    if (llm) { base.ctxWindow = Number(x.ctxWindow); base.compactAt = Number(x.compactAt) || 0; }
     return base;
   };
   return { active: d.active, local: one("local"), openrouter: one("openrouter"), custom: one("custom") };
@@ -94,9 +95,15 @@ function EndpointForm({ kind, draft, onChange, saved }: {
         </div>
       )}
       {kind === "llm" && (
-        <Field label="Окно контекста модели (токены)" hint="для счётчика контекста и порога переполнения; сворачивание истории — по-прежнему после 32k">
-          <Input value={cur.ctxWindow} inputMode="numeric" onChange={(e) => set({ ctxWindow: e.target.value })} className="max-w-40" data-testid="set-llm-ctx" />
-        </Field>
+        <div className="grid gap-3 sm:grid-cols-2 [&>*]:min-w-0">
+          <Field label="Окно контекста (токены)" hint="размер окна модели — для счётчика контекста в чате">
+            <Input value={cur.ctxWindow} inputMode="numeric" onChange={(e) => set({ ctxWindow: e.target.value })} data-testid="set-llm-ctx" />
+          </Field>
+          <Field label="Сворачивать историю после (токены)"
+            hint={(() => { const w = Number(cur.ctxWindow) || 0; const auto = w >= 8192 ? (w <= 65536 ? 32000 : w - 24576) : null; return `пусто — авто${auto ? ` (≈${auto.toLocaleString("ru-RU")} для этого окна)` : ""}: после порога старые ходы заменяются резюме`; })()}>
+            <Input value={cur.compactAt} inputMode="numeric" onChange={(e) => set({ compactAt: e.target.value })} placeholder="авто" data-testid="set-llm-compact" />
+          </Field>
+        </div>
       )}
       <div className="flex items-center gap-3">
         <Button size="sm" disabled={testing} onClick={() => void test()} data-testid={`set-${kind}-test`}>
