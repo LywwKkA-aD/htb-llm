@@ -3,7 +3,26 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { Maximize2, Minimize2, Plus, RefreshCw, X } from "lucide-react";
 import { api, wsUrl } from "../api";
-import { Button, Dot, cx, isModalOpen } from "../ui";
+import { Button, Dot, cx, isModalOpen, useToast } from "../ui";
+
+// Копирование в буфер браузера двумя путями: async Clipboard API, а если браузер его режет
+// (Brave с его разрешением на буфер обмена, потерянная активация жеста) — legacy execCommand
+// через временный textarea: он под async-разрешение не попадает. false = не вышло никак.
+async function copyToClipboard(text: string): Promise<boolean> {
+  try { await navigator.clipboard.writeText(text); return true; } catch { /* пробуем legacy ниже */ }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return ok;
+  } catch { return false; }
+}
 
 const theme = {
   background: "#101927", foreground: "#d9e2f2", cursor: "#9fef00", cursorAccent: "#101927", selectionBackground: "#40600088",
@@ -15,6 +34,14 @@ const theme = {
 type WsState = "connecting" | "open" | "closed";
 
 function useXterm(kind: "agent" | "shell", taskId: string, sid = 1) {
+  const toast = useToast();
+  const copyFailAt = useRef(0);
+  const copyFailed = () => {
+    const now = Date.now();
+    if (now - copyFailAt.current < 10_000) return; // не спамить тостом на каждое выделение
+    copyFailAt.current = now;
+    toast("error", "не удалось скопировать в буфер браузера — разреши сайту доступ к буферу обмена (в Brave: замок в адресной строке → настройки сайта → буфер обмена)");
+  };
   const ref = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<WsState>("connecting");
   const [gen, setGen] = useState(0);
@@ -35,7 +62,7 @@ function useXterm(kind: "agent" | "shell", taskId: string, sid = 1) {
       if (b64 && b64 !== "?") {
         try {
           const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-          void navigator.clipboard.writeText(new TextDecoder().decode(bytes)).catch(() => {});
+          void copyToClipboard(new TextDecoder().decode(bytes)).then((ok) => { if (!ok) copyFailed(); });
         } catch { /* не base64 — игнорируем */ }
       }
       return true;
@@ -76,7 +103,7 @@ function useXterm(kind: "agent" | "shell", taskId: string, sid = 1) {
       if (e.type === "keydown" && (e.ctrlKey || e.metaKey) && !e.altKey) {
         const key = e.key.toLowerCase();
         if (key === "c" && term.hasSelection()) {
-          void navigator.clipboard?.writeText(term.getSelection()).catch(() => {});
+          void copyToClipboard(term.getSelection()).then((ok) => { if (!ok) copyFailed(); });
           if (!e.shiftKey) term.clearSelection();
           return false;
         }

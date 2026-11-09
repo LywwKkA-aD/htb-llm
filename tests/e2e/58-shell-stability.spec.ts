@@ -34,6 +34,34 @@ test.describe("стабильность shell-сессий", () => {
     }, { timeout: 15_000 }).toEqual({ standalone: 1, glued: 0 });
   });
 
+  test("копирование выделением работает и при заблокированном async clipboard (Brave режет writeText)", async ({ page }) => {
+    test.setTimeout(120_000);
+    // Brave может отклонять navigator.clipboard.writeText (разрешение на буфер) — тогда OSC52-копирование
+    // обязано доехать legacy-путём execCommand, а не молча теряться.
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator.clipboard, "writeText", {
+        value: () => Promise.reject(new DOMException("blocked by test", "NotAllowedError")),
+      });
+    });
+    await openTask(page, ids);
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(page.url()).origin });
+    await expect(page.getByTestId("term-shell")).toHaveAttribute("data-ws", "open", { timeout: 20_000 });
+    await expect.poll(() => termText(page, "shell"), { timeout: 20_000 }).toMatch(/root@task-\w+/);
+    const term = page.getByTestId("term-shell");
+    await term.locator(".xterm-helper-textarea").focus();
+    await page.keyboard.type("echo COPY-BRAVE-$((40+2))");
+    await page.keyboard.press("Enter");
+    await expect.poll(() => termText(page, "shell")).toContain("COPY-BRAVE-42");
+    await page.evaluate(() => navigator.clipboard.readText().catch(() => "")); // буфер мог держать старое — дальше поллим именно маркер
+    const box = await term.locator(".xterm-screen").boundingBox();
+    expect(box, "экран терминала виден").toBeTruthy();
+    await page.mouse.move(box!.x + 6, box!.y + 6);
+    await page.mouse.down();
+    await page.mouse.move(box!.x + box!.width - 6, box!.y + box!.height - 6, { steps: 16 });
+    await page.mouse.up();
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText()), { timeout: 10_000 }).toContain("COPY-BRAVE-42");
+  });
+
   test("reverse shell в job-листенере живёт сквозь команды агента, пользовательский терминал и паузу", async ({ page, request }) => {
     test.setTimeout(240_000);
     const jobOut = async (jobId: string) =>
