@@ -80,10 +80,8 @@ function useXterm(kind: "agent" | "shell", taskId: string, sid = 1) {
           if (!e.shiftKey) term.clearSelection();
           return false;
         }
-        if (key === "v" && e.shiftKey && kind === "shell") {
-          void navigator.clipboard?.readText().then((t) => { if (t) term.paste(t); }).catch(() => {});
-          return false;
-        }
+        // Вставку НЕ делаем руками: Ctrl+Shift+V/Ctrl+V браузер сам вставляет в xterm-textarea,
+        // а ручной readText+term.paste поверх этого дублировал текст дважды.
       }
       return true;
     });

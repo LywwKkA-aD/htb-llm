@@ -307,7 +307,7 @@ export const TOOLS = [
         type: "object",
         properties: {
           name: { type: "string", description: "короткое имя, например listener-4444" },
-          command: { type: "string", description: "команда сессии, например nc -lvnp 4444 или cd /work/www && python3 -m http.server 8000" },
+          command: { type: "string", description: "команда сессии, например nc -lkvp 4444 (с -k листенер продолжает слушать после отключения шелла) или cd /work/www && python3 -m http.server 8000" },
         },
         required: ["name", "command"],
       },
