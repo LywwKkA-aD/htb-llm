@@ -723,7 +723,9 @@ export async function runTool(name: string, rawArgs: string, ctx: ToolCtx): Prom
         }
         // Детект пойманного reverse shell (shellhint.ts): подсказка один раз на подключение.
         const hint = r.job.running && fresh ? shellCatchHint(ctx.taskId, r.job, fresh) : "";
-        return hint ? `${body}\n${hint}` : body;
+        // Диагностика листенера: мёртвое соединение/очередь backlog — иначе модель поллит пустой экран.
+        const diag = r.job.running ? await sandbox.jobListenerDiag(ctx.taskId, r.job.id).catch(() => "") : "";
+        return [body, hint, diag].filter(Boolean).join("\n");
       }
       case "job_input": {
         const enter = a.enter !== false && String(a.enter ?? "").toLowerCase() !== "false";

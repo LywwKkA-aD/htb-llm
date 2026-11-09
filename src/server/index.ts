@@ -311,7 +311,9 @@ app.post("/api/tasks/:id/jobs", wrap(async (req) => {
 }));
 app.get("/api/tasks/:id/jobs/:job/output", wrap(async (req) => {
   jobOr404(P(req, "id"), P(req, "job"));
-  return sandbox.jobOutput(P(req, "id"), P(req, "job"), Number(req.query.lines) || 160);
+  const r = await sandbox.jobOutput(P(req, "id"), P(req, "job"), Number(req.query.lines) || 160);
+  const diag = r.job.running ? await sandbox.jobListenerDiag(P(req, "id"), P(req, "job")).catch(() => "") : "";
+  return diag ? { ...r, output: r.output ? `${r.output}\n${diag}` : diag } : r;
 }));
 app.post("/api/tasks/:id/jobs/:job/input", wrap(async (req) => {
   jobOr404(P(req, "id"), P(req, "job"));

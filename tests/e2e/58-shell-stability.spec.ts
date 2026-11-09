@@ -113,6 +113,26 @@ test.describe("стабильность shell-сессий", () => {
     await request.post(`/api/tasks/${ids.task.id}/jobs/${listener.id}/stop`);
   });
 
+  test("job_output диагностирует непринятое соединение в очереди одноразового листенера", async ({ request }) => {
+    test.setTimeout(180_000);
+    const mk = async (name: string, command: string) =>
+      (await (await request.post(`/api/tasks/${ids.task.id}/jobs`, { data: { name, command } })).json()).id as string;
+    const out = async (jobId: string) =>
+      (await (await request.get(`/api/tasks/${ids.task.id}/jobs/${jobId}/output?lines=80`)).json()).output as string;
+    const listener = await mk("nc-once-4447", "nc -lvnp 4447"); // без -k: второе соединение встанет в backlog
+    const t1 = await mk("target-a", "bash -c 'bash -i >& /dev/tcp/127.0.0.1/4447 0>&1'");
+    await expect.poll(() => out(listener), { timeout: 20_000 }).toContain("Connection received");
+    const t2 = await mk("target-b", "bash -c 'bash -i >& /dev/tcp/127.0.0.1/4447 0>&1'");
+    try {
+      await expect.poll(() => out(listener), { timeout: 30_000 }).toContain("диагностика листенера");
+      expect(await out(listener)).toContain("непринятое соединение");
+    } finally {
+      await request.post(`/api/tasks/${ids.task.id}/jobs/${t2}/stop`).catch(() => {});
+      await request.post(`/api/tasks/${ids.task.id}/jobs/${t1}/stop`).catch(() => {});
+      await request.post(`/api/tasks/${ids.task.id}/jobs/${listener}/stop`).catch(() => {});
+    }
+  });
+
   test("job_input «^C» реально прерывает команду в job, а не печатает два символа", async ({ request }) => {
     test.setTimeout(120_000);
     const job = await (await request.post(`/api/tasks/${ids.task.id}/jobs`, {

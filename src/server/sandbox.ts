@@ -1236,6 +1236,76 @@ export async function jobOutput(taskId: string, id: string, lines = 160): Promis
   const { last_output: _drop, ...job } = row;
   return { job: { ...job, running }, output };
 }
+// ---------- диагностика листенера job: мёртвый шелл и непринятая очередь ----------
+// Модель (и человек в Jobs) по capture-pane не отличает «тихо» от «соединение умерло»: поллит
+// job_output десятками раундов. Смотрим сокеты листенера через ss и говорим прямо: ACK давно не было
+// и наши байты ретранслируются (процесс цели мёртв/цель недоступна) либо в очереди порта висит
+// непринятое соединение (одноразовый nc занят зомби-шеллом и новый не примет).
+function listenerPort(cmd: string): number | null {
+  const m = /--lport[= ](\d{2,5})\b/.exec(cmd) ?? /TCP4?-LISTEN:(\d{2,5})\b/i.exec(cmd)
+    ?? (/\b(nc|ncat|netcat|penelope)\b/.test(cmd)
+      ? /(?:^|\s)-\w*p\w*\s+(\d{2,5})\b/.exec(cmd) ?? /\s(\d{2,5})\s*$/.exec(cmd.trim())
+      : null);
+  const p = m ? Number(m[1]) : NaN;
+  return Number.isInteger(p) && p > 0 && p < 65536 ? p : null;
+}
+type ListenerFlow = { owned: boolean; sendQ: number; lastack?: number; unacked?: number; retrans?: number };
+function parseSsFlows(out: string, port: number): { flows: ListenerFlow[]; backlog: number } {
+  const flows: ListenerFlow[] = [];
+  let backlog = 0;
+  let cur: ListenerFlow | null = null;
+  const num = (re: RegExp, s: string) => { const m = re.exec(s); return m ? Number(m[1]) : undefined; };
+  for (const line of out.split("\n")) {
+    if (line.startsWith("ESTAB")) {
+      const cols = line.trim().split(/\s+/);
+      if (!(cols[3] ?? "").endsWith(`:${port}`)) { cur = null; continue; }
+      cur = { owned: line.includes("users:(("), sendQ: Number(cols[2]) || 0 };
+      flows.push(cur);
+    } else if (line.startsWith("LISTEN")) {
+      const cols = line.trim().split(/\s+/);
+      if ((cols[3] ?? "").endsWith(`:${port}`)) backlog = Math.max(backlog, Number(cols[1]) || 0);
+      cur = null;
+    } else if (cur && /^\s/.test(line)) {
+      cur.lastack = num(/lastack:(\d+)/, line);
+      cur.unacked = num(/unacked:(\d+)/, line);
+      cur.retrans = num(/bytes_retrans:(\d+)/, line);
+    }
+  }
+  return { flows, backlog };
+}
+const listenerDiagCache = new Map<string, { at: number; diag: string }>();
+export async function jobListenerDiag(taskId: string, id: string): Promise<string> {
+  const row = getJob(taskId, id);
+  if (!row) return "";
+  const port = listenerPort(row.command);
+  if (!port) return "";
+  const key = `${taskId}:${id}`;
+  const cached = listenerDiagCache.get(key);
+  if (cached && Date.now() - cached.at < 10_000) return cached.diag;
+  let diag = "";
+  try {
+    if ((await status(taskId)) === "running") {
+      const out = await execRaw(docker.getContainer(cname(taskId)),
+        `ss -tinp 2>/dev/null; ss -ltnp 2>/dev/null`, 6000);
+      const { flows, backlog } = parseSsFlows(out, port);
+      const queued = flows.filter((f) => !f.owned).length;
+      const notes: string[] = [];
+      const owned = flows.filter((f) => f.owned);
+      const stale = owned.filter((f) => (f.lastack ?? 0) > 90_000 && ((f.unacked ?? 0) > 0 || (f.retrans ?? 0) > 0 || f.sendQ > 0));
+      if (owned.length && stale.length === owned.length) {
+        const worst = Math.max(...stale.map((f) => f.lastack ?? 0));
+        const age = worst >= 120_000 ? `~${Math.round(worst / 60_000)} мин` : `~${Math.round(worst / 1000)} с`;
+        notes.push(`[диагностика листенера: соединение шелла выглядит мёртвым — ACK от цели не было ${age}, наши данные ретранслируются. Удалённый процесс мёртв или цель недоступна: не полли впустую — job_stop листенера, проверь доступность цели (curl), перетриггерь]`);
+      }
+      if (queued > 0 || backlog > 0)
+        notes.push(`[диагностика листенера: в очереди порта ${port} висит непринятое соединение — листенер занят текущим (возможно мёртвым) шеллом и новое не примет, пока старое не закроется. job_stop этого job, подними penelope или nc -lkvp и перетриггерь]`);
+      diag = notes.join("\n");
+    }
+  } catch { /* диагностика — подсказка, не повод ронять job_output */ }
+  listenerDiagCache.set(key, { at: Date.now(), diag });
+  return diag;
+}
+
 export async function jobInput(taskId: string, id: string, text: string, enter = true): Promise<JobInfo> {
   const row = getJob(taskId, id);
   if (!row) throw jobNotFound(taskId, id);
