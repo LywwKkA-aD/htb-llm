@@ -7,6 +7,19 @@ async function waitReindex(request: any) {
   return (await (await request.get("/api/settings/reindex")).json());
 }
 
+test.describe("пустая база знаний на свежей установке", () => {
+  test("кнопка переиндексации неактивна и UI честно объясняет, что сначала строится база (knowledge)", async ({ page, request }) => {
+    const s = await (await request.get("/api/settings")).json();
+    test.skip(s.embedIndex.chunks > 0, "в этом прогоне индекс уже не пуст (чужие документы) — пустое состояние не воспроизвести");
+    const ids = await createTask(request, "Переиндексация: пустая база");
+    await openTask(page, ids);
+    await page.getByTestId("settings-open").click();
+    await expect(page.getByTestId("embed-index-empty")).toContainText("knowledge");
+    await expect(page.getByTestId("reindex-start")).toBeDisabled();
+    await page.keyboard.press("Escape");
+  });
+});
+
 test.describe("переиндексация RAG при смене эмбеддингов", () => {
   let ids: Ids;
   let docId = 0;

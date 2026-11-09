@@ -158,10 +158,20 @@ function IndexBlock({ info0, reindex0 }: { info0: EmbedIndexInfo; reindex0: Rein
           индекс: <span className="text-fg">{info.chunks}</span> фрагментов · вектор {info.dim} · модель «{info.model}»
         </span>
         <span className="flex-1" />
-        <Button size="sm" variant={info.stale ? "primary" : "ghost"} disabled={st.running || info.chunks === 0} onClick={() => void start()} data-testid="reindex-start">
+        <Button size="sm" variant={info.stale ? "primary" : "ghost"} disabled={st.running || info.chunks === 0}
+          title={info.chunks === 0 ? "Сначала построй базу знаний: ./docker/run.sh knowledge" : undefined}
+          onClick={() => void start()} data-testid="reindex-start">
           {st.running ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} переиндексировать
         </Button>
       </div>
+      {info.chunks === 0 && !st.running && (
+        <div className="mt-1.5 text-[11.5px] leading-snug text-dim" data-testid="embed-index-empty">
+          база знаний ещё не построена — переиндексировать нечего. Настрой эмбеддинги выше, сохрани и выполни один раз{" "}
+          <code className="rounded bg-surface-3 px-1 font-mono text-[11px] text-fg">./docker/run.sh knowledge</code>{" "}
+          (в хостовом режиме — <code className="rounded bg-surface-3 px-1 font-mono text-[11px] text-fg">pnpm knowledge</code>):
+          скачаются зафиксированные источники знаний и построится индекс.
+        </div>
+      )}
       {info.stale && !st.running && (
         <div className="mt-1.5 flex items-start gap-1.5 text-[11.5px] leading-snug text-warn" data-testid="embed-index-stale">
           <TriangleAlert size={12} className="mt-px flex-none" />
