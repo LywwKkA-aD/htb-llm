@@ -103,6 +103,24 @@ test.describe("VPN задачи в контейнере (HTB)", () => {
     expect(dexec(ids.task.id, "stat -c '%a %n' /work/.whitehat/vpn/config.ovpn")).toContain("600 /work/.whitehat/vpn/config.ovpn");
   });
 
+  // Регрессия Docker-развёртывания (Windows/Docker Desktop): устройство раньше пробрасывалось только
+  // если /dev/net/tun существовал в окружении самого сервера; в app-контейнере его нет — и Kali
+  // навсегда оставался без tun, а «пересоздай контейнер» давало ту же спеку.
+  test("tun из коробки: cgroup-правило 10:200 в спеке, снесённый /dev/net/tun сам возвращается к старту VPN", async ({ request }) => {
+    test.setTimeout(120_000);
+    dexec(ids.task.id, "true"); // заодно проверяет, что контейнер принадлежит тестовому прогону
+    const rules = JSON.parse(execFileSync("docker", ["inspect", "-f", "{{json .HostConfig.DeviceCgroupRules}}", `whitehat-${ids.task.id}`]).toString().trim() || "null");
+    expect(rules).toContain("c 10:200 rwm");
+
+    expect(dexec(ids.task.id, "rm -f /dev/net/tun; [ -c /dev/net/tun ] && echo STILL || echo GONE")).toContain("GONE");
+    const start = await request.post(`/api/tasks/${ids.task.id}/vpn/start`, { timeout: 90_000 });
+    expect(start.ok(), await start.text()).toBeTruthy();
+    expect(dexec(ids.task.id, "[ -c /dev/net/tun ] && echo TUNBACK")).toContain("TUNBACK");
+    expect((await vpnGet(request, ids.task.id)).status.state).toBe("connecting");
+    const stop = await request.post(`/api/tasks/${ids.task.id}/vpn/stop`, { timeout: 60_000 });
+    expect(stop.ok(), await stop.text()).toBeTruthy();
+  });
+
   test("openvpn стартует демоном в контейнере: connecting + живой лог, стоп снимает процесс", async ({ request }) => {
     test.setTimeout(120_000); // старт ждёт поднятия туннеля до 25 с
     const start = await request.post(`/api/tasks/${ids.task.id}/vpn/start`, { timeout: 90_000 });

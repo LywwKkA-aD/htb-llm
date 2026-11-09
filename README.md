@@ -50,7 +50,7 @@ HTB LLM — управляемый рабочий стол для решения
 
 Требуется Linux, Docker Engine и Docker Compose v2. Приложение управляет Kali-контейнерами через host Docker socket, поэтому запуск рассчитан на доверенную локальную машину.
 
-**Windows:** нативно не поддерживается — запускайте внутри WSL2 (Ubuntu): включите в Docker Desktop интеграцию с вашей WSL-дистрибуцией (Settings → Resources → WSL integration), клонируйте репозиторий в домашний каталог WSL (не на `/mnt/c/...`, иначе bind-пути Kali-контейнеров и скорость будут проблемой) и дальше всё как в Linux. PowerShell-обёртки нет: `docker/run.sh` — bash-скрипт и сам откажется работать вне Linux.
+**Windows:** нативно не поддерживается — запускайте внутри WSL2 (Ubuntu): включите в Docker Desktop интеграцию с вашей WSL-дистрибуцией (Settings → Resources → WSL integration), клонируйте репозиторий в домашний каталог WSL (не на `/mnt/c/...`, иначе bind-пути Kali-контейнеров и скорость будут проблемой) и дальше всё как в Linux. PowerShell-обёртки нет: `docker/run.sh` — bash-скрипт и сам откажется работать вне Linux. Ручных донастроек хоста не нужно: `/dev/net/tun` для VPN внутри Kali-контейнеров сервер выдаёт сам при создании контейнера (cgroup-правило + узел устройства), нужен лишь актуальный Docker Desktop.
 
 ```bash
 git clone https://github.com/LywwKkA-aD/htb-llm.git

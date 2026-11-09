@@ -396,6 +396,7 @@ async function ensureOnce(taskId: string) {
       try { await c.start(); } catch (e: any) { if (e?.statusCode !== 304) throw e; } // 304 — уже запущен
     }
     containerIds.set(taskId, info.Id);
+    await ensureTunNode(c);
     await outputDir(taskId, c);
     await syncHosts(taskId, c, info.Id);
     return c;
@@ -411,8 +412,12 @@ async function ensureOnce(taskId: string) {
     HostConfig: {
       Binds: [`${hostPath(work)}:/work`], // daemon видит хостовый путь; внутри app-контейнера DATA может быть /data
       NetworkMode: SANDBOX_NET, // изолированная сеть: интернет есть, соседних задач и сервисов на docker0 нет
-      // /dev/net/tun: OpenVPN/WireGuard внутри контейнера (HTB), ligolo и прочие туннели. Нет на хосте — без него.
-      ...(fs.existsSync("/dev/net/tun") ? { Devices: [{ PathOnHost: "/dev/net/tun", PathInContainer: "/dev/net/tun", CgroupPermissions: "rwm" }] } : {}),
+      // /dev/net/tun: OpenVPN внутри контейнера (HTB), ligolo и прочие туннели. НЕ проброс хостового
+      // устройства: сервер может жить в app-контейнере без /dev/net/tun, а демон — в VM Docker Desktop,
+      // поэтому проверка fs на стороне сервера врала в обоих мирах и устройство молча не добавлялось.
+      // Явное cgroup-правило c 10:200 + mknod изнутри (ensureTunNode) работает на стоковом Docker
+      // (Linux и Docker Desktop) без ручных донастроек хоста.
+      DeviceCgroupRules: ["c 10:200 rwm"],
       CapAdd: ["NET_ADMIN", "NET_RAW"], // сетевые лабы внутри контейнера: iptables, bridge/veth, сырые сокеты
       Init: true,
       Memory: 4 * 1024 ** 3,
@@ -431,10 +436,19 @@ async function ensureOnce(taskId: string) {
   }
   await c.start();
   containerIds.set(taskId, c.id);
+  await ensureTunNode(c);
   await outputDir(taskId, c);
   await syncHosts(taskId, c, c.id);
   agentWrite(taskId, `${C.dim}# контейнер ${name} создан (Kali, NET_ADMIN, интернет; изолированная сеть ${SANDBOX_NET})${C.reset}\r\n`);
   return c;
+}
+
+// Узел /dev/net/tun внутри контейнера: /dev — tmpfs рантайма и при каждом старте пустая, поэтому
+// узел создаём изнутри после старта (root + MKNOD). Право на открытие даёт DeviceCgroupRules при
+// создании; на стоковом Docker tun (10:200) и так в дефолтном allow-листе, поэтому чинятся и старые
+// контейнеры без правила. Best-effort: не вышло — честно скажет префлайт старта VPN (ensureTunUsable).
+async function ensureTunNode(c: Docker.Container) {
+  try { await execRaw(c, "mkdir -p /dev/net && { [ -c /dev/net/tun ] || mknod /dev/net/tun c 10 200 2>/dev/null; } && chmod 666 /dev/net/tun 2>/dev/null; true", 5000); } catch { /* ignore */ }
 }
 
 // /work/.whitehat (файлы полного вывода) должна принадлежать пользователю сервера: если её создал root контейнера
@@ -1475,7 +1489,40 @@ export async function vpnStatusCached(taskId: string, ttlMs = 15_000): Promise<V
 }
 
 const whErr = (out: string) => out.split("\n").find((l) => l.startsWith("WHERR "))?.slice(6);
-const NO_TUN = `[ -c /dev/net/tun ] || { echo "WHERR в контейнере нет /dev/net/tun — пересоздай контейнер (кнопка ↻ в шапке справа), файлы /work сохранятся"; exit 3; }`;
+const NO_TUN = `[ -c /dev/net/tun ] || { echo "WHERR в контейнере нет /dev/net/tun — попробуй старт VPN ещё раз (устройство создаётся автоматически)"; exit 3; }`;
+
+// Открывается ли tun на самом деле: узел может существовать, но cgroup или ядро VM не пустят.
+const TUN_PROBE = `mkdir -p /dev/net; [ -c /dev/net/tun ] || mknod /dev/net/tun c 10 200 2>/dev/null; chmod 666 /dev/net/tun 2>/dev/null; python3 -c "import os; os.close(os.open('/dev/net/tun', os.O_RDWR))" 2>/dev/null && echo WHTUNOK || echo WHTUNFAIL`;
+
+// Есть ли у контейнера явный доступ к tun в спеке (контейнеры старых версий создавались без правила:
+// устройство пробрасывалось только если было видно самому серверу, а в Docker-развёртывании — никогда).
+function specHasTun(info: Docker.ContainerInspectInfo): boolean {
+  const hc: any = info.HostConfig ?? {};
+  if (hc.Privileged) return true;
+  const devs: any[] = Array.isArray(hc.Devices) ? hc.Devices : [];
+  if (devs.some((d) => d?.PathInContainer === "/dev/net/tun")) return true;
+  const rules: string[] = Array.isArray(hc.DeviceCgroupRules) ? hc.DeviceCgroupRules : [];
+  return rules.some((r) => {
+    const s = String(r).trim();
+    return /^c\s+(10:200|10:\*|\*:\*)\s+/.test(s) && s.includes("r") && s.includes("w");
+  });
+}
+
+// Префлайт OpenVPN: tun должен открываться. Не открывается в старом контейнере без правила —
+// пересоздаём контейнер сами (раньше UI велел делать это вручную, но пересоздание давало ту же
+// спеку). Не открывается и с правилом — честная причина уровня Docker/ядра, а не тупик-цикл.
+async function ensureTunUsable(taskId: string) {
+  const probe = async () => (await execCollect(taskId, TUN_PROBE, 15)).output.includes("WHTUNOK");
+  if (await probe().catch(() => false)) return;
+  let has = false;
+  try { has = specHasTun(await docker.getContainer(cname(taskId)).inspect()); } catch { /* ignore */ }
+  if (!has) {
+    agentNote(taskId, "VPN: у контейнера нет доступа к /dev/net/tun (создан старой версией) — пересоздаю контейнер сам, файлы /work сохранятся…");
+    await reset(taskId);
+    if (await probe().catch(() => false)) return;
+  }
+  throw new Error("Docker не даёт контейнеру открыть /dev/net/tun (нужен OpenVPN), хотя NET_ADMIN выдан. На Windows/macOS: обнови Docker Desktop до актуальной версии и полностью перезапусти его. На Linux: проверь, что на хосте есть /dev/net/tun (модуль ядра tun).");
+}
 
 async function startVpnLocked(taskId: string): Promise<VpnStatus> {
   const info = getVpnConfig(taskId);
@@ -1487,10 +1534,11 @@ async function startVpnLocked(taskId: string): Promise<VpnStatus> {
     writeNoFollow(path.join(dir, "wh-down.sh"), VPN_DOWN_SH, 0o700);
   }
   await ensure(taskId);
+  // OpenVPN нужен открывающийся /dev/net/tun; ядерному WireGuard узел tun не требуется (netlink).
+  if (info.kind === "openvpn") await ensureTunUsable(taskId);
   agentNote(taskId, `VPN: подключаю «${info.name}» (${info.kind}) внутри контейнера…`);
   const script = info.kind === "wireguard" ? [
     `mkdir -p ${VPN_RT}`,
-    NO_TUN,
     `command -v wg-quick >/dev/null || { echo "WHERR в образе нет wireguard-tools — пересобери образ Kali"; exit 3; }`,
     `wg show wg0 >/dev/null 2>&1 && { echo WHALREADY; exit 0; }`,
     // resolvconf в контейнере нет: DNS= из конфига wg-quick применить не сможет и упадёт — вырезаем с пометкой в лог
