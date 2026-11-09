@@ -1,4 +1,4 @@
-import { test, expect, createTask, mockReset, openTask, type Ids } from "./helpers";
+import { test, expect, createTask, expectInside, mockReset, openTask, type Ids } from "./helpers";
 
 // Управление моделями из веба (в тестах WH_SERVICES=off: настоящие llama-процессы не трогаем,
 // проверяем честное «управление отключено») и интеграция HTB по App Token против стаба в mock-llm
@@ -56,7 +56,7 @@ test.describe("сервисы моделей и HTB", () => {
     const st = await (await request.get("/api/htb/status?refresh=1")).json();
     expect(st.configured).toBe(true);
     expect(st.user).toMatchObject({ name: "mockhacker", rank: "Pro Hacker", points: 321, userOwns: 12, systemOwns: 9, nextRank: "Elite Hacker", level: 12, levelTitle: "Apprentice", levelGrade: "1", xpInLevel: 40, xpUntilNext: 60, xpTotal: 940 });
-    expect(st.activeMachine).toMatchObject({ id: 777, name: "MockBox", ip: "10.129.9.9", difficultyText: "Easy", os: "Linux" });
+    expect(st.activeMachine).toMatchObject({ id: 777, name: "MockBox", ip: "10.129.245.100", difficultyText: "Easy", os: "Linux" });
 
     const found = (await (await request.get("/api/htb/machines?q=second")).json()) as any[];
     expect(found).toHaveLength(1);
@@ -71,8 +71,8 @@ test.describe("сервисы моделей и HTB", () => {
     expect(r1.existed).toBe(false);
     expect(r1.task.title).toBe("MockBox");
     expect(r1.task.brief).toContain("HTB machine #777");
-    expect(r1.task.brief).toContain("10.129.9.9");
-    expect(r1.task.target).toBe("10.129.9.9");
+    expect(r1.task.brief).toContain("10.129.245.100");
+    expect(r1.task.target).toBe("10.129.245.100");
     expect(r1.task.hostname).toBe("mockbox.htb");
 
     const r2 = await (await request.post("/api/htb/import", { data: {} })).json();
@@ -109,7 +109,11 @@ test.describe("сервисы моделей и HTB", () => {
     await expect(page.getByTestId("htb-owns")).toContainText("9");
     await page.getByTestId("htb-refresh").click(); // кэш сервера после внешнего mockReset
     await expect(page.getByTestId("htb-active")).toContainText("MockBox");
-    await expect(page.getByTestId("htb-active-ip")).toHaveText("10.129.9.9");
+    await expect(page.getByTestId("htb-active-ip")).toHaveText("10.129.245.100");
+    // длинный IP не выталкивает кнопки карточки за её границу и за сайдбар
+    await expectInside(page.getByTestId("htb-active"), page.getByTestId("sidebar"), "карточка активной машины внутри сайдбара");
+    await expectInside(page.getByTestId("htb-stop"), page.getByTestId("htb-active"), "кнопка стоп внутри карточки");
+    await expectInside(page.getByTestId("htb-import-active"), page.getByTestId("htb-active"), "кнопка «в задачу» внутри карточки");
 
     await page.getByTestId("htb-import-active").click();
     // навигация без URL-роутов: открытая задача — aria-current у её строки в сайдбаре

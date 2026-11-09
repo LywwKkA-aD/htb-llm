@@ -428,7 +428,7 @@ export function TaskDialog({ task, open, onClose, onSave, onDelete }: {
       </>}
     >
       <div className="space-y-4" onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) void save(); }}>
-        <div className="grid grid-cols-[1fr_200px] gap-3">
+        <div className="grid grid-cols-[1fr_200px] gap-3 [&>*]:min-w-0">
           <Field label="название">
             <Input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Лаба 3 — VLAN и маршрутизация" data-testid="task-title"
               onKeyDown={(e) => { if (e.key === "Enter") void save(); }} />
@@ -437,7 +437,7 @@ export function TaskDialog({ task, open, onClose, onSave, onDelete }: {
             <Input value={course} onChange={(e) => setCourse(e.target.value)} placeholder="Сети" data-testid="task-course" />
           </Field>
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-3 [&>*]:min-w-0">
           <Field label="цель (IP)" hint="$TARGET в контейнере; HTB синкает сам">
             <Input value={target} onChange={(e) => setTarget(e.target.value)} placeholder="10.129.x.x" data-testid="task-target" />
           </Field>

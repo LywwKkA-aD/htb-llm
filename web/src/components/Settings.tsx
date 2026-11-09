@@ -60,7 +60,7 @@ function EndpointForm({ kind, draft, onChange, saved }: {
       <Seg<Preset> testid={`set-${kind}-preset`} size="md" value={draft.active}
         options={(Object.keys(PRESET_LABEL) as Preset[]).map((v) => ({ value: v, label: PRESET_LABEL[v] }))}
         onChange={(v) => { onChange({ ...draft, active: v }); setResult(null); }} />
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 sm:grid-cols-2 [&>*]:min-w-0">
         <Field label="Адрес API (OpenAI-совместимый, …/v1)">
           <Input value={cur.url} onChange={(e) => set({ url: e.target.value })} placeholder="https://openrouter.ai/api/v1" data-testid={`set-${kind}-url`} />
         </Field>
@@ -82,7 +82,7 @@ function EndpointForm({ kind, draft, onChange, saved }: {
         </div>
       </Field>
       {p === "openrouter" && (
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2 [&>*]:min-w-0">
           <Field label="Провайдер OpenRouter" hint="slug провайдера; можно несколько через запятую по приоритету">
             <Input value={cur.provider} onChange={(e) => set({ provider: e.target.value })} placeholder="relace" data-testid={`set-${kind}-provider`} />
           </Field>

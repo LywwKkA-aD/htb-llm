@@ -182,10 +182,10 @@ function HtbBlock({ onImportedTask }: { onImportedTask?: (taskId: string, chatId
             {st.activeMachine.ip
               ? <Flag size={11} className="flex-none text-accent" />
               : <Loader2 size={11} className="flex-none animate-spin text-warn" />}
-            <code className="flex-1 text-[12px] text-accent" data-testid="htb-active-ip">{st.activeMachine.ip ?? "стартует…"}</code>
-            <Button size="xs" variant="solid" disabled={busy !== null} onClick={() => importMachine()} data-testid="htb-import-active">
+            <code className="min-w-0 flex-1 truncate text-[12px] text-accent" title={st.activeMachine.ip ?? undefined} data-testid="htb-active-ip">{st.activeMachine.ip ?? "стартует…"}</code>
+            <Button size="xs" variant="solid" className="flex-none" disabled={busy !== null} onClick={() => importMachine()} data-testid="htb-import-active">
               {busy === "import" ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />} в задачу</Button>
-            <Button size="xs" variant="ghost" disabled={busy !== null} title="остановить машину на HTB" aria-label="остановить машину HTB" data-testid="htb-stop"
+            <Button size="xs" variant="ghost" className="flex-none" disabled={busy !== null} title="остановить машину на HTB" aria-label="остановить машину HTB" data-testid="htb-stop"
               onClick={async () => { if (await confirm({ title: "Остановить машину?", message: <>«{st.activeMachine!.name}» будет выключена на HTB, несохранённый прогресс на ней пропадёт.</>, confirmText: "остановить", danger: true })) void act("stop", async () => setSt(await api.htbStop())); }}>
               <Square size={10} /></Button>
           </div>

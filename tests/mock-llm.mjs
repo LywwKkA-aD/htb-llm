@@ -26,7 +26,7 @@ const HTB_MACHINES = [
   { id: 777, name: "MockBox", os: "Linux", difficulty: 21, difficultyText: "Easy", points: 20, state: "active", free: true, rating: 4.4, authUserInUserOwns: false, authUserInRootOwns: false, ip: null },
   { id: 778, name: "SecondBox", os: "Windows", difficulty: 43, difficultyText: "Medium", points: 30, state: "active", free: true, rating: 4.1, authUserInUserOwns: true, authUserInRootOwns: false, ip: null },
 ];
-const htbDefaultActive = () => ({ id: 777, name: "MockBox", ip: "10.129.9.9", isSpawning: false, type: "Free", expires_at: "2030-01-01 00:00:00", lab_server: "mock_lab", vpn_server_id: 1, tier_id: null });
+const htbDefaultActive = () => ({ id: 777, name: "MockBox", ip: "10.129.245.100", isSpawning: false, type: "Free", expires_at: "2030-01-01 00:00:00", lab_server: "mock_lab", vpn_server_id: 1, tier_id: null });
 let htbActive = htbDefaultActive();
 
 const plugins = [];
