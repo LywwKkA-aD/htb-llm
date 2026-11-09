@@ -3,7 +3,7 @@
 // и точный usage.prompt_tokens для управления контекстом. Адрес/модель/ключ берутся из активных
 // настроек (settings.ts): локальный llama-server, OpenRouter или любой OpenAI-совместимый API.
 import { cfg } from "./config.ts";
-import { embedDimState } from "./db.ts";
+import { embedDimState, reloadEmbedDim } from "./db.ts";
 import { activeLlm, activeEmbed, type EndpointCfg } from "./settings.ts";
 import { openRouterReasoningInfo } from "./openrouter.ts";
 
@@ -283,7 +283,9 @@ export async function embed(texts: string[], kind: "query" | "doc"): Promise<Flo
     }
     for (const row of j.data.sort((a: any, b: any) => a.index - b.index)) {
       const v = Float32Array.from(row.embedding as number[]);
-      // чужая размерность молча ломала бы векторный поиск — падаем с понятной причиной
+      // чужая размерность молча ломала бы векторный поиск — падаем с понятной причиной;
+      // но сначала перечитать размерность из БД: её мог сменить соседний процесс (CLI-сборка базы)
+      if (v.length !== embedDimState.dim) reloadEmbedDim();
       if (v.length !== embedDimState.dim)
         throw new Error(`эмбеддинг-модель «${epd.model}» вернула вектор ${v.length}, а индекс базы знаний построен на ${embedDimState.dim} — переиндексируй базу в настройках или верни прежнюю модель эмбеддингов`);
       let n = 0;

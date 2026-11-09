@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { extractText, getDocumentProxy } from "unpdf";
-import { db, now, vecBuf, embedDimState, recreateVecTable, type Doc } from "./db.ts";
+import { db, now, vecBuf, embedDimState, recreateVecTable, reloadEmbedDim, type Doc } from "./db.ts";
 import { embed, probeEmbedDim } from "./llm.ts";
 import { activeEmbed, recordEmbedIndex } from "./settings.ts";
 import { ROOT } from "./config.ts";
@@ -89,10 +89,36 @@ export function addDoc(file: string, name: string, taskId: string | null): Doc {
   return db.prepare("select * from docs where id=?").get(id) as Doc;
 }
 
+// Свежая установка: chunks_vec создана на дефолтной размерности локальной модели (1024), а пользователь
+// первым делом включил внешний эмбеддинг другой размерности (Cohere — 2048). Пока индекс пуст — нет ни
+// фрагментов, ни векторов памяти — терять нечего: пересоздать таблицу под активную модель прямо здесь.
+// Иначе первая же индексация падает на гарде embed(), а «переиндексировать» в UI при 0 фрагментов
+// отключена — тупик. Непустой индекс не трогаем: там смена размерности = осознанная переиндексация.
+export async function ensureIndexDim() {
+  const chunks = (db.prepare("select count(*) as n from chunks").get() as { n: number }).n;
+  if (chunks > 0) return;
+  const mems = (db.prepare("select count(*) as n from memories where embedding is not null").get() as { n: number }).n;
+  if (mems > 0) return;
+  const dim = await probeEmbedDim().catch(() => null);
+  if (dim && dim !== embedDimState.dim) recreateVecTable(dim);
+}
+
+// Полная сборка базы при непустом индексе чужой размерности: упасть сразу и честно, до того как
+// indexPack начнёт удалять старые паки и получать ошибку размерности на каждом.
+export async function assertEmbedDimMatchesIndex() {
+  const dim = await probeEmbedDim();
+  if (dim !== embedDimState.dim) {
+    const act = activeEmbed();
+    throw new Error(`активная модель эмбеддингов «${act.model}» даёт вектор ${dim}, а индекс построен на ${embedDimState.dim} и не пуст — сначала переиндексируй базу в настройках (кнопка «переиндексировать»), потом обновляй источники`);
+  }
+}
+
 async function indexDoc(id: number) {
   const d = db.prepare("select * from docs where id=?").get(id) as Doc;
   const { pages, chunks } = await parse(d.path, d.kind);
   if (!chunks.length) throw new Error("в файле не найден текст (скан без OCR?)");
+  const wasEmpty = (db.prepare("select count(*) as n from chunks").get() as { n: number }).n === 0;
+  await ensureIndexDim();
   const vecs = await embed(chunks.map((c) => (c.heading ? `${c.heading}\n${c.text}` : c.text)), "doc");
   const scope = scopeOf(d.task_id);
   const ins = db.prepare("insert into chunks(doc_id,scope,page,heading,text) values(?,?,?,?,?)");
@@ -106,6 +132,12 @@ async function indexDoc(id: number) {
     });
     db.prepare("update docs set status='ready', pages=?, chunks=?, error=null where id=?").run(pages, chunks.length, id);
   })();
+  // Первый документ пустого индекса задаёт, чем индекс построен — иначе настройки вечно показывают
+  // «устарел» свежей установке на внешнем пресете, хотя база только что построена активной моделью.
+  if (wasEmpty) {
+    const act = activeEmbed();
+    recordEmbedIndex(act.model, act.url);
+  }
 }
 
 export function deleteDoc(id: number) {
@@ -255,6 +287,7 @@ export function startKnowledgeBuild(): KnowledgeState {
     knowledgeState.finishedAt = Date.now();
   });
   child.on("close", (code) => {
+    reloadEmbedDim(); // дочерний процесс мог пересоздать vec-таблицу под другую размерность
     if (code !== 0 && !knowledgeState.error) {
       const lastErr = [...knowledgeState.lines].reverse().find((l) => /ОШИБКА|error|fatal/i.test(l));
       knowledgeState.error = lastErr ?? `построение завершилось с кодом ${code} — детали в логе выше`;

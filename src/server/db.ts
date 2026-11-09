@@ -145,6 +145,12 @@ export function recreateVecTable(dim: number) {
   db.prepare("insert into settings(key,value) values('embed_dim',?) on conflict(key) do update set value=excluded.value")
     .run(JSON.stringify(dim));
 }
+// Размерность мог сменить соседний процесс с той же базой (CLI-сборка базы знаний рядом с живым
+// сервером): embedDimState в памяти тогда врёт. Перечитать сохранённое значение из settings.
+export function reloadEmbedDim() {
+  const d = storedEmbedDim();
+  if (d !== embedDimState.dim) embedDimState.dim = d;
+}
 
 // Миграции существующих баз + бэкфилл TARGET/hostname для уже импортированных HTB-задач (IP жил только в брифе).
 {

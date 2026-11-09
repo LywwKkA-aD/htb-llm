@@ -236,6 +236,19 @@ async function main() {
     }
   }
 
+  if (!flag("--generate-only") && jobs.length) {
+    // Пустой индекс подтянуть под размерность активной модели (свежая установка сразу на внешнем
+    // эмбеддинге); непустой чужой размерности — стоп сейчас, а не ошибка на каждом паке после удалений.
+    try {
+      await library.ensureIndexDim();
+      await library.assertEmbedDimMatchesIndex();
+    } catch (e) {
+      console.error(`ОСТАНОВ: ${(e as Error).message}`);
+      process.exitCode = 1;
+      return;
+    }
+  }
+
   let failed = 0;
   for (const j of jobs) {
     const sha = sha256File(j.path);

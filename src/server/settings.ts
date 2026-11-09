@@ -3,7 +3,7 @@
 // Для каждого пресета свой конфиг — переключение не теряет ключи и модели. Дефолты локального
 // пресета берутся из env (WH_LLM_URL и т.д. через cfg), поэтому CLI и e2e работают как раньше.
 // API-ключи наружу не отдаются: публичный вид содержит только apiKeySet.
-import { db, embedDimState } from "./db.ts";
+import { db, embedDimState, reloadEmbedDim } from "./db.ts";
 import { cfg } from "./config.ts";
 
 export type Preset = "local" | "openrouter" | "custom";
@@ -224,16 +224,19 @@ export function recordEmbedIndex(model: string, url: string) {
 }
 
 export function embedIndexInfo(s: AppSettings = getSettings()): EmbedIndexInfo {
+  reloadEmbedDim(); // размерность могла смениться в соседнем процессе (CLI-сборка базы)
   const rec = stored<{ model: string; url: string; at: number }>("embed_index");
   const act = s.embed[s.embed.active];
   const chunks = (db.prepare("select count(*) as n from chunks").get() as { n: number }).n;
+  // Пустой индекс не «устарел» — ему нечего терять при смене модели: первая сборка сама подтянет
+  // размерность (library.ensureIndexDim), а подсказка «переиндексируй» при 0 фрагментов — тупик.
   if (!rec?.model) {
     // индекс строился локальной моделью по умолчанию; устарел только если активен не локальный пресет
-    return { model: "embed", url: cfg.embedUrl, dim: embedDimState.dim, chunks, stale: s.embed.active !== "local", builtAt: null };
+    return { model: "embed", url: cfg.embedUrl, dim: embedDimState.dim, chunks, stale: chunks > 0 && s.embed.active !== "local", builtAt: null };
   }
   return {
     model: rec.model, url: rec.url ?? "", dim: embedDimState.dim, chunks,
-    stale: act.model !== rec.model || act.url !== (rec.url ?? ""), builtAt: rec.at ?? null,
+    stale: chunks > 0 && (act.model !== rec.model || act.url !== (rec.url ?? "")), builtAt: rec.at ?? null,
   };
 }
 

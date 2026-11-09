@@ -232,8 +232,9 @@ async function handleChat(body, res, auth = null) {
 }
 
 // ---------- эмбеддинги: детерминированный «мешок слов» через хэш ----------
-function embedOne(text) {
-  const dim = 1024;
+// Размерность как у настоящих моделей: локальная Qwen3-Embedding — 1024, cohere/embed-5-fast — 2048.
+// Иначе e2e не видит смену размерности при переходе local -> внешний API (баг свежей установки).
+function embedOne(text, dim = 1024) {
   const v = new Float32Array(dim);
   let t = text.replace(/<\|endoftext\|>/g, "");
   const qi = t.indexOf("Query:");
@@ -380,8 +381,9 @@ code line 2 &lt;tag&gt;</pre>
   if (url.pathname === "/v1/chat/completions") return handleChat(body, res, req.headers.authorization ?? null).catch((e) => { try { res.end(); } catch { /* */ } console.error(e); });
   if (url.pathname === "/v1/embeddings") {
     const input = Array.isArray(body.input) ? body.input : [body.input];
+    const dim = String(body.model ?? "").includes("cohere") ? 2048 : 1024;
     res.writeHead(200, { "Content-Type": "application/json" });
-    return res.end(JSON.stringify({ data: input.map((t, index) => ({ index, embedding: embedOne(String(t)) })) }));
+    return res.end(JSON.stringify({ data: input.map((t, index) => ({ index, embedding: embedOne(String(t), dim) })) }));
   }
   res.writeHead(404); res.end();
 });
