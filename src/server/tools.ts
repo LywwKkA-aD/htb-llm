@@ -337,7 +337,7 @@ export const TOOLS = [
     type: "function",
     function: {
       name: "job_input",
-      description: "Отправить ввод в фоновый job (команду в пойманный reverse shell, ответ интерактивной программе). По умолчанию после текста нажимается Enter.",
+      description: "Отправить ввод в фоновый job (команду в пойманный reverse shell, ответ интерактивной программе). По умолчанию после текста нажимается Enter. Прервать зависшее в шелле: text=\"^C\" (или настоящий символ \\u0003) и enter=false — буквальный текст «^C» внутри команды клавишей не считается.",
       parameters: {
         type: "object",
         properties: { id: { type: "string" }, text: { type: "string" }, enter: { type: "boolean" } },

@@ -1242,10 +1242,28 @@ export async function jobInput(taskId: string, id: string, text: string, enter =
   if ((await status(taskId).catch(() => "missing")) !== "running") throw new Error("контейнер задачи не запущен");
   const c = await ensure(taskId);
   const sname = jobSessionName(id);
-  const script = `tmux send-keys -t ${sname} -l -- ${shq(text)}${enter ? ` && tmux send-keys -t ${sname} Enter` : ""}`;
-  await execRaw(c, script, 8000);
+  // Управляющие клавиши шлём настоящими tmux-клавишами, а не литеральным текстом: модель регулярно
+  // присылает «^C» двумя символами (и шелл получает мусор вместо прерывания) или настоящий \u0003 —
+  // оба варианта обязаны прерывать. Цельный текст «^C»/«^Z»/«^D» тоже трактуем как клавишу.
+  const caret = /^\s*\^([a-zA-Z@[\]\\^_])\s*$/.exec(text);
+  const norm = caret ? String.fromCharCode(caret[1].toUpperCase().charCodeAt(0) & 0x1f) : text;
+  const parts: string[] = [];
+  let run = "";
+  const flush = () => { if (run) { parts.push(`tmux send-keys -t ${sname} -l -- ${shq(run)}`); run = ""; } };
+  for (const ch of norm) {
+    const code = ch.charCodeAt(0);
+    const key = code === 0x1b ? "Escape" : code === 0x7f ? "BSpace"
+      : code >= 1 && code <= 26 && code !== 9 && code !== 10 && code !== 13 ? `C-${String.fromCharCode(code + 96)}` : null;
+    if (key) { flush(); parts.push(`tmux send-keys -t ${sname} ${key}`); }
+    else run += ch;
+  }
+  flush();
+  if (enter) parts.push(`tmux send-keys -t ${sname} Enter`);
+  // Живость проверяем ДО отправки: Ctrl-C вправе завершить сессию, и это не ошибка ввода.
+  const before = await jobOutput(taskId, id, 5).catch(() => null);
+  if (!before?.job.running) throw new Error("job не запущен");
+  await execRaw(c, parts.join(" && ") || "true", 8000);
   const { job } = await jobOutput(taskId, id, 40);
-  if (!job.running) throw new Error("job не запущен");
   return job;
 }
 export async function stopJob(taskId: string, id: string): Promise<JobInfo> {

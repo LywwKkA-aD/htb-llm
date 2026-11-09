@@ -112,4 +112,23 @@ test.describe("стабильность shell-сессий", () => {
     await request.post(`/api/tasks/${ids.task.id}/jobs/${target2.id}/stop`);
     await request.post(`/api/tasks/${ids.task.id}/jobs/${listener.id}/stop`);
   });
+
+  test("job_input «^C» реально прерывает команду в job, а не печатает два символа", async ({ request }) => {
+    test.setTimeout(120_000);
+    const job = await (await request.post(`/api/tasks/${ids.task.id}/jobs`, {
+      data: { name: "sleeper", command: "sleep 100; echo NEVER-REACHED" },
+    })).json();
+    await new Promise((r) => setTimeout(r, 1000));
+    const inp = await request.post(`/api/tasks/${ids.task.id}/jobs/${job.id}/input`, { data: { text: "^C", enter: false } });
+    expect(inp.ok(), await inp.text()).toBeTruthy();
+    // SIGINT дошёл: сессия завершилась или обёртка доложила rc — но не «спит молча дальше»
+    await expect.poll(async () => {
+      const list = await (await request.get(`/api/tasks/${ids.task.id}/jobs`)).json();
+      const j = list.find((x: any) => x.id === job.id);
+      const out = (await (await request.get(`/api/tasks/${ids.task.id}/jobs/${job.id}/output?lines=40`)).json()).output as string;
+      return j?.running === false || out.includes("команда завершилась");
+    }, { timeout: 15_000 }).toBe(true);
+    const out = (await (await request.get(`/api/tasks/${ids.task.id}/jobs/${job.id}/output?lines=40`)).json()).output as string;
+    expect(out).not.toContain("NEVER-REACHED");
+  });
 });
