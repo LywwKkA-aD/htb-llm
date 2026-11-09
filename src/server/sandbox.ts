@@ -409,12 +409,15 @@ async function ensureOnce(taskId: string) {
     Cmd: ["sleep", "infinity"],
     Env: ["TERM=xterm-256color", "LANG=C.UTF-8"],
     Labels: { "whitehat.task": taskId, "whitehat.data": DATA }, // по метке data тесты убирают только свои контейнеры
-    // SOCKS для браузера хоста публикуется сразу в спеке: bridge-IP из Docker Desktop не маршрутизируется
-    ExposedPorts: { [`${cfg.socksPort}/tcp`]: {} },
+    // SOCKS и панель встроенного браузера публикуются сразу в спеке: bridge-IP из Docker Desktop не маршрутизируется
+    ExposedPorts: { [`${cfg.socksPort}/tcp`]: {}, [`${cfg.browserPort}/tcp`]: {} },
     HostConfig: {
       Binds: [`${hostPath(work)}:/work`], // daemon видит хостовый путь; внутри app-контейнера DATA может быть /data
       NetworkMode: SANDBOX_NET, // изолированная сеть: интернет есть, соседних задач и сервисов на docker0 нет
-      PortBindings: { [`${cfg.socksPort}/tcp`]: [{ HostIp: "127.0.0.1", HostPort: "" }] },
+      PortBindings: {
+        [`${cfg.socksPort}/tcp`]: [{ HostIp: "127.0.0.1", HostPort: "" }],
+        [`${cfg.browserPort}/tcp`]: [{ HostIp: "127.0.0.1", HostPort: "" }],
+      },
       // /dev/net/tun: OpenVPN внутри контейнера (HTB), ligolo и прочие туннели. НЕ проброс хостового
       // устройства: сервер может жить в app-контейнере без /dev/net/tun, а демон — в VM Docker Desktop,
       // поэтому проверка fs на стороне сервера врала в обоих мирах и устройство молча не добавлялось.
@@ -481,6 +484,8 @@ export async function destroy(taskId: string) {
       await execCollect(taskId, "find /work -mindepth 1 -delete", 60);
     } catch (e) { console.warn("[destroy] очистка /work:", (e as Error).message); }
   }
+  await removeBrowser(taskId);
+  browserPhase.delete(taskId);
   try { await docker.getContainer(cname(taskId)).remove({ force: true }); } catch { /* уже нет */ }
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { console.warn("[destroy] rm:", (e as Error).message); }
   buses.delete(taskId);
@@ -491,6 +496,8 @@ export async function destroy(taskId: string) {
 
 // Пересоздать контейнер с нуля (файлы в /work остаются)
 export async function reset(taskId: string) {
+  await removeBrowser(taskId); // сайдкар браузера жил в netns старого контейнера
+  browserPhase.delete(taskId);
   hostsSynced.delete(taskId);
   vpnCache.delete(taskId); // туннель жил в старом контейнере; конфиг в /work останется, подключится заново из вкладки VPN
   try { await docker.getContainer(cname(taskId)).remove({ force: true }); } catch { /* ignore */ }
@@ -1481,7 +1488,7 @@ export async function vpnStatus(taskId: string): Promise<VpnStatus> {
   if (s.socks.running) {
     // Предпочтительно опубликованный на 127.0.0.1 хоста порт (работает и на Docker Desktop);
     // bridge-IP — запасной вариант для Linux-хоста, если форвардер не поднялся.
-    const pub = await socksPublishedPort(taskId);
+    const pub = await publishedPort(taskId, cfg.socksPort);
     if (pub) s.socks.url = `socks5://127.0.0.1:${pub}`;
     else {
       const ip = await containerIp(taskId);
@@ -1614,17 +1621,17 @@ export async function deleteVpnConfig(taskId: string): Promise<void> {
 // сеть с enable_icc=false не пускает контейнеры друг к другу. Контейнеры старых версий без публикации
 // на Docker Desktop пересоздаются один раз при первом включении SOCKS; на Linux-хосте bridge-адрес
 // и так маршрутизируется, там старые контейнеры не трогаем.
-async function socksPublishedPort(taskId: string): Promise<number | null> {
+async function publishedPort(taskId: string, port: number): Promise<number | null> {
   try {
     const i = await docker.getContainer(cname(taskId)).inspect();
     if (!i.State.Running) return null;
-    const p = Number(i.NetworkSettings?.Ports?.[`${cfg.socksPort}/tcp`]?.[0]?.HostPort);
+    const p = Number(i.NetworkSettings?.Ports?.[`${port}/tcp`]?.[0]?.HostPort);
     return Number.isInteger(p) && p > 0 ? p : null;
   } catch { return null; }
 }
 
-function specHasSocksPort(info: Docker.ContainerInspectInfo): boolean {
-  const b = (info.HostConfig as any)?.PortBindings?.[`${cfg.socksPort}/tcp`];
+function specHasPort(info: Docker.ContainerInspectInfo, port: number): boolean {
+  const b = (info.HostConfig as any)?.PortBindings?.[`${port}/tcp`];
   return Array.isArray(b) && b.length > 0;
 }
 
@@ -1644,7 +1651,7 @@ export const startSocks = (taskId: string) => withVpnLock(taskId, async (): Prom
   // один раз пересоздать контейнер (VPN после этого подключить заново). На Linux bridge работает как есть.
   try {
     const info = await docker.getContainer(cname(taskId)).inspect();
-    if (!specHasSocksPort(info) && (await isDockerDesktop())) {
+    if (!specHasPort(info, cfg.socksPort) && (await isDockerDesktop())) {
       agentNote(taskId, "SOCKS: контейнер создан старой версией без опубликованного порта для браузера — пересоздаю его (файлы /work сохранятся, VPN нужно подключить заново)…");
       await reset(taskId);
     }
@@ -1672,3 +1679,121 @@ export const stopSocks = (taskId: string) => withVpnLock(taskId, async (): Promi
   vpnCache.delete(taskId);
   return vpnStatus(taskId).catch(() => DOWN);
 });
+
+// ---------- браузер задачи: Selkies-Firefox сайдкаром в netns контейнера ----------
+// Графический Firefox в сетевом пространстве задачи: видит VPN-туннель и цели напрямую, без SOCKS
+// и без настроек прокси. Selkies стримит картинку видеопотоком (не VNC) в веб-панель; порт панели
+// опубликован на 127.0.0.1 хоста в спеке контейнера задачи. Профиль Firefox — bind /config из
+// /work/.whitehat/browser: переживает пересоздания сайдкара и контейнера.
+export type BrowserPhase = "stopped" | "pulling" | "starting" | "running" | "error";
+export type BrowserStatus = { running: boolean; phase: BrowserPhase; url?: string; error?: string; image: string };
+const browserName = (taskId: string) => `whitehat-browser-${taskId}`;
+const browserPhase = new Map<string, { phase: BrowserPhase; error?: string }>();
+
+async function browserUrl(taskId: string): Promise<string | undefined> {
+  const pub = await publishedPort(taskId, cfg.browserPort);
+  if (pub) return `http://127.0.0.1:${pub}/`;
+  const ip = await containerIp(taskId); // Linux-хост без публикации: bridge-адрес панели
+  return ip ? `http://${ip}:${cfg.browserPort}/` : undefined;
+}
+
+export async function browserStatus(taskId: string): Promise<BrowserStatus> {
+  const st = browserPhase.get(taskId);
+  // Идущий старт важнее сырого inspect: контейнер сайдкара уже Running, а Selkies ещё не отвечает —
+  // панель в этот момент показала бы битый iframe вместо «поднимаю…».
+  if (st?.phase === "pulling" || st?.phase === "starting")
+    return { running: false, phase: st.phase, image: cfg.browserImage };
+  let running = false;
+  try { running = (await docker.getContainer(browserName(taskId)).inspect()).State.Running; } catch { /* сайдкара нет */ }
+  if (running) return { running, phase: "running", url: await browserUrl(taskId), image: cfg.browserImage };
+  if (st?.phase === "error") return { running, phase: "error", error: st.error, image: cfg.browserImage };
+  return { running, phase: "stopped", image: cfg.browserImage };
+}
+
+async function removeBrowser(taskId: string) {
+  try { await docker.getContainer(browserName(taskId)).remove({ force: true }); } catch { /* уже нет */ }
+}
+
+export const stopBrowser = (taskId: string) => withVpnLock(taskId, async (): Promise<BrowserStatus> => {
+  await removeBrowser(taskId);
+  browserPhase.delete(taskId);
+  agentNote(taskId, "Браузер: остановлен");
+  return browserStatus(taskId);
+});
+
+// Старт не блокирует запрос: первый запуск качает образ минутами. Панель поллит browserStatus.
+export const startBrowser = (taskId: string) => withVpnLock(taskId, async (): Promise<BrowserStatus> => {
+  const cur = browserPhase.get(taskId);
+  if (cur?.phase === "pulling" || cur?.phase === "starting") return browserStatus(taskId);
+  const st = await browserStatus(taskId);
+  if (st.running) return st;
+  browserPhase.set(taskId, { phase: "starting" });
+  void runBrowserStart(taskId).catch((e) => {
+    browserPhase.set(taskId, { phase: "error", error: String((e as Error)?.message ?? e) });
+    agentNote(taskId, `Браузер: не поднялся — ${String((e as Error)?.message ?? e)}`);
+  });
+  return { running: false, phase: "starting", image: cfg.browserImage };
+});
+
+async function runBrowserStart(taskId: string) {
+  await ensure(taskId);
+  try {
+    const info = await docker.getContainer(cname(taskId)).inspect();
+    if (!specHasPort(info, cfg.browserPort) && (await isDockerDesktop())) {
+      agentNote(taskId, "Браузер: контейнер создан старой версией без опубликованного порта панели — пересоздаю его (файлы /work сохранятся, VPN нужно подключить заново)…");
+      await reset(taskId);
+    }
+  } catch { /* дальше как обычно: на Linux панель доступна по bridge-адресу */ }
+  let has = true;
+  try { await docker.getImage(cfg.browserImage).inspect(); } catch { has = false; }
+  if (!has) {
+    browserPhase.set(taskId, { phase: "pulling" });
+    agentNote(taskId, `Браузер: скачиваю образ ${cfg.browserImage} — первый запуск, гигабайты, несколько минут…`);
+    const stream = await docker.pull(cfg.browserImage);
+    await new Promise<void>((res, rej) => docker.modem.followProgress(stream, (e: any) => (e ? rej(e) : res())));
+  }
+  browserPhase.set(taskId, { phase: "starting" });
+  await removeBrowser(taskId); // старый сайдкар мог остаться в мёртвом netns после пересоздания задачи
+  const cfgDir = path.join(paths.taskWork(taskId), ".whitehat", "browser");
+  try { fs.mkdirSync(cfgDir, { recursive: true }); } catch { /* bind создаст каталог сам */ }
+  const c = await docker.createContainer({
+    name: browserName(taskId),
+    Image: cfg.browserImage,
+    Env: ["TITLE=HTB LLM Browser"],
+    Labels: { "whitehat.browser": taskId, "whitehat.data": DATA },
+    HostConfig: {
+      Binds: [`${hostPath(cfgDir)}:/config`],
+      NetworkMode: `container:${cname(taskId)}`, // тот же netns: VPN-туннель и цели — напрямую
+      ShmSize: 1024 ** 3, // Firefox с дефолтными 64 МБ /dev/shm роняет вкладки
+      Memory: 2 * 1024 ** 3,
+      NanoCpus: 2e9,
+      RestartPolicy: { Name: "no" },
+    },
+  });
+  await c.start();
+  // Готовность из netns задачи: панель сайдкара отвечает на общем localhost. Три 200 подряд:
+  // при первом старте со свежим /config инициализация образа может перезапустить сервисы после
+  // первого ответа, и одиночная проба даёт ложную готовность (хост ловит ECONNRESET).
+  const deadline = Date.now() + 180_000;
+  let ok = 0;
+  for (;;) {
+    const out = await execCollect(taskId, `curl -s -o /dev/null -w '%{http_code}' --max-time 3 http://127.0.0.1:${cfg.browserPort}/ 2>/dev/null || echo 000`, 10)
+      .then((r) => r.output).catch(() => "");
+    ok = out.includes("200") ? ok + 1 : 0;
+    if (ok >= 3) break;
+    if (Date.now() > deadline) throw new Error(`панель браузера не ответила стабильно за 3 минуты — посмотри логи: docker logs ${browserName(taskId)}`);
+    await sleep(2000);
+  }
+  await syncBrowserHosts(taskId, c).catch(() => {});
+  browserPhase.set(taskId, { phase: "running" });
+  agentNote(taskId, "Браузер: Firefox в сети контейнера поднят — вкладка «Браузер» (цели через VPN видны напрямую, имена .htb подтянуты из hosts контейнера)");
+}
+
+// Имена целей (machine.htb и vhost'ы) живут в /etc/hosts контейнера задачи; у сайдкара файл свой.
+async function syncBrowserHosts(taskId: string, sidecar: Docker.Container) {
+  const hosts = (await execCollect(taskId, "cat /etc/hosts", 10)).output;
+  const lines = hosts.split("\n").map((l) => l.trim()).filter((l) =>
+    l && !l.startsWith("#") && !/^127\.|^::1|^fe00|^ff00/.test(l));
+  if (!lines.length) return;
+  await execRaw(sidecar, lines.map((l) => `grep -qxF ${shq(l)} /etc/hosts || echo ${shq(l)} >> /etc/hosts`).join("\n"), 10_000);
+}

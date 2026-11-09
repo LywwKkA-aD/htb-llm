@@ -43,6 +43,9 @@ export const cfg = {
   maxCmdTimeoutSec: 900,
   // SOCKS5 внутри контейнера (microsocks) для браузера/Burp на хосте через VPN задачи
   socksPort: 1080,
+  // Браузерная панель задачи: Selkies-Firefox сайдкаром в netns контейнера (видеострим без VNC-лагов)
+  browserImage: process.env.WH_BROWSER_IMAGE ?? "lscr.io/linuxserver/firefox:latest",
+  browserPort: 3000,
 
   // Бюджет контекста (токены). Скорость генерации падает от ЗАПОЛНЕННОГО контекста,
   // поэтому держим живую историю короткой, а знания — в памяти задачи и библиотеке.

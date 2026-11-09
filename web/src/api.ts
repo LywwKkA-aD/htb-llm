@@ -55,6 +55,11 @@ export type VpnInfo = {
   containerIp: string | null;
   status: { state: "down" | "connecting" | "up"; iface?: string; ip?: string; log: string[]; socks: { running: boolean; url?: string } };
 };
+export type BrowserInfo = {
+  running: boolean;
+  phase: "stopped" | "pulling" | "starting" | "running" | "error";
+  url?: string; error?: string; image: string;
+};
 export type JobInfo = { id: string; task_id: string; name: string; command: string; created_at: number; running: boolean };
 export type PlanStatus = "todo" | "doing" | "done" | "blocked" | "skipped";
 export type PlanItem = { id: string; phase: string; text: string; status: PlanStatus; note: string; sort: number };
@@ -191,6 +196,9 @@ export const api = {
   deleteVpnConfig: (taskId: string) => j<VpnInfo>(`/api/tasks/${taskId}/vpn/config`, json("DELETE")),
   vpnAction: (taskId: string, action: "start" | "stop" | "socks-start" | "socks-stop") =>
     j<VpnInfo>(`/api/tasks/${taskId}/vpn/${action}`, json("POST")),
+  browser: (taskId: string) => j<BrowserInfo>(`/api/tasks/${taskId}/browser`),
+  browserAction: (taskId: string, action: "start" | "stop") =>
+    j<BrowserInfo>(`/api/tasks/${taskId}/browser/${action}`, json("POST")),
 };
 
 // Сообщение не принято сервером (сеть до ответа, 409 «уже идёт ответ», 413, 404…): в журнал оно не попало,

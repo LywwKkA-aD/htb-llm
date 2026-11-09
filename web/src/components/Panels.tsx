@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Brain, Check, Copy, FileText, FolderOpen, Library, Loader2, Network, Pencil, Play, Plus, Square, Trash2, Upload, AlertCircle, ListTodo, X } from "lucide-react";
-import { api, KIND_RU, type Doc, type Memory, type Task, type VpnInfo } from "../api";
+import { Brain, Check, Copy, ExternalLink, FileText, FolderOpen, Globe, Library, Loader2, Network, Pencil, Play, Plus, Square, Trash2, Upload, AlertCircle, ListTodo, X } from "lucide-react";
+import { api, KIND_RU, type BrowserInfo, type Doc, type Memory, type Task, type VpnInfo } from "../api";
 import { Button, Dot, Field, Input, Modal, Seg, Textarea, cx, useConfirm, useToast } from "../ui";
 
 const SectionTitle = ({ children, testid }: { children: React.ReactNode; testid?: string }) => (
@@ -370,6 +370,75 @@ export function VpnPanel({ task, onChanged }: { task: Task; onChanged?: (info: V
 }
 
 // ---------- создание / редактирование задачи ----------
+// ---------- встроенный браузер задачи (Selkies-Firefox в netns контейнера) ----------
+export function BrowserPanel({ task }: { task: Task }) {
+  const toast = useToast();
+  const [info, setInfo] = useState<BrowserInfo | null>(null);
+  const [busy, setBusy] = useState(false);
+  const cur = useRef(task.id);
+  useLayoutEffect(() => { if (cur.current !== task.id) { cur.current = task.id; setInfo(null); } }, [task.id]);
+  const load = useCallback(() => {
+    const id = task.id;
+    return api.browser(id).then((v) => { if (cur.current === id) setInfo(v); })
+      .catch((e) => { if (cur.current === id) toast("error", e.message); });
+  }, [task.id, toast]);
+  useEffect(() => { void load(); }, [load]);
+  const transient = info?.phase === "pulling" || info?.phase === "starting";
+  useEffect(() => {
+    if (!transient) return;
+    const t = setInterval(load, 2000);
+    return () => clearInterval(t);
+  }, [transient, load]);
+  const act = async (a: "start" | "stop") => {
+    setBusy(true);
+    try { const v = await api.browserAction(task.id, a); if (cur.current === task.id) setInfo(v); }
+    catch (e: any) { toast("error", e.message); }
+    setBusy(false);
+    void load();
+  };
+  const running = !!info?.running && !!info.url;
+  return (
+    <div className="flex h-full flex-col" data-testid="browser-panel">
+      <div className="flex flex-none flex-wrap items-center gap-2.5 px-4 py-3">
+        <Dot state={running ? "ok" : transient ? "mid" : "off"} />
+        <span className="text-[13px] text-fg" data-testid="browser-status" data-phase={info?.phase ?? "loading"}>
+          {!info ? "проверяю…"
+            : running ? "Firefox в сети контейнера — цели через VPN видны напрямую"
+            : info.phase === "pulling" ? "скачиваю образ браузера (первый запуск, несколько минут)…"
+            : info.phase === "starting" ? "поднимаю контейнер браузера…"
+            : info.phase === "error" ? "не поднялся" : "выключен"}
+        </span>
+        <span className="flex-1" />
+        {running && info?.url && (
+          <Button size="sm" variant="ghost" onClick={() => window.open(info.url, "_blank")} data-testid="browser-open">
+            <ExternalLink size={13} /> отдельной вкладкой
+          </Button>
+        )}
+        {running || transient
+          ? <Button size="sm" variant="danger" disabled={busy} onClick={() => void act("stop")} data-testid="browser-stop">
+              {busy ? <Loader2 size={13} className="animate-spin" /> : <Square size={12} />} выключить</Button>
+          : <Button size="sm" variant="solid" disabled={busy || !info} onClick={() => void act("start")} data-testid="browser-start">
+              {busy ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />} включить браузер</Button>}
+      </div>
+      {info?.phase === "error" && info.error && (
+        <div className="mx-4 mb-3 flex-none rounded-[10px] border border-err/40 bg-err/10 px-3 py-2.5 text-[12px] leading-relaxed text-err" data-testid="browser-error">{info.error}</div>
+      )}
+      {running && info?.url
+        ? <iframe key={info.url} src={info.url} title="Firefox задачи" className="min-h-0 w-full flex-1 border-t border-line bg-black" data-testid="browser-frame" allow="clipboard-read; clipboard-write; fullscreen" />
+        : <div className="px-4 pb-4">
+            <Note>
+              Графический Firefox внутри сетевого пространства Kali-контейнера: веб машин HTB открывается напрямую
+              через VPN задачи — без SOCKS и настроек прокси. Подними VPN во вкладке рядом, включи браузер и ходи
+              на <span className="text-fg">http://machine.htb</span> — имена берутся из hosts контейнера. Веб целей
+              может грузиться минутами, это норма для лаб: не дёргай перезагрузку и повторную отправку логина.
+              Первый запуск скачивает образ (~1–2 ГБ), профиль Firefox хранится в /work задачи.
+            </Note>
+            <div className="flex items-center gap-2 text-[12px] text-dim"><Globe size={13} className="text-accent" /> стрим Selkies (видео, не VNC) — картинка и ввод без характерных VNC-лагов</div>
+          </div>}
+    </div>
+  );
+}
+
 export function TaskDialog({ task, open, onClose, onSave, onDelete }: {
   task: Task | null; open: boolean; onClose: () => void;
   onSave: (t: { title: string; course: string; brief: string; target: string; hostname: string }) => Promise<void>; onDelete?: () => Promise<void>;
