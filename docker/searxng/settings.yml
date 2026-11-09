@@ -1,0 +1,18 @@
+use_default_settings: true
+
+general:
+  instance_name: "HTB LLM Search"
+  enable_metrics: false
+
+server:
+  # For the internal-only Compose service this placeholder is sufficient; SEARXNG_SECRET overrides it.
+  secret_key: "htb-llm-local-only"
+  limiter: false
+  image_proxy: true
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  formats:
+    - html
+    - json

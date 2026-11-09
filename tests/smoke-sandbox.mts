@@ -1,0 +1,15 @@
+import WebSocket from "ws";
+import * as library from "../src/server/library.ts";
+import { runTool } from "../src/server/tools.ts";
+const hits = await library.search("как посмотреть arp таблицу в линуксе", "s4d9o339z0", 3);
+console.log("SEARCH:", hits.map(h => `${h.doc} [${h.heading}] score=${h.score.toFixed(4)}`));
+const ws = new WebSocket("ws://127.0.0.1:7331/ws/agent?task=s4d9o339z0");
+let got = ""; ws.on("message", (d) => { got += d.toString(); });
+await new Promise(r => ws.on("open", r));
+const out = await runTool("shell", JSON.stringify({ command: "ip -br addr; ip neigh show; ping -c1 -W2 1.1.1.1 | tail -1; dig +short rfc-editor.org | head -2" }), { taskId: "s4d9o339z0", emit: () => {} });
+console.log("TOOL RESULT:\n" + out);
+await new Promise(r => setTimeout(r, 300));
+console.log("WS got", got.length, "bytes; has prompt:", got.includes("agent@task"), "has output:", got.includes("1.1.1.1") || got.includes("rtt"));
+console.log("SUBNET:", (await runTool("subnet_calc", JSON.stringify({ address: "172.16.5.200/21" }), { taskId: "s4d9o339z0", emit: () => {} })).split("\n").slice(0, 5).join(" | "));
+console.log("RFC:", (await runTool("read_rfc", JSON.stringify({ number: 826, grep: "hardware address space" }), { taskId: "s4d9o339z0", emit: () => {} })).slice(0, 300));
+ws.close(); process.exit(0);

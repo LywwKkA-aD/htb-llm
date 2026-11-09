@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "note": "Точные коммиты внешних источников знаний. Сами третьи материалы в репозиторий HTB LLM не входят: scripts/knowledge.mts скачивает их из первоисточников локально. Обновление lock: WH_KNOWLEDGE_LATEST=1 pnpm knowledge, затем перенести commit из data/knowledge/manifest.json.",
+  "sources": {
+    "hacktricks": {
+      "repo": "https://github.com/HackTricks-wiki/hacktricks.git",
+      "commit": "c53dc79e08aa567847a346463c27b1db5ed11861",
+      "license": "CC BY-NC 4.0"
+    },
+    "payloadsallthethings": {
+      "repo": "https://github.com/swisskyrepo/PayloadsAllTheThings.git",
+      "commit": "08ea40e77db3f42ef8f20c65196f3936a19b6c86",
+      "license": "MIT"
+    },
+    "internalallthethings": {
+      "repo": "https://github.com/swisskyrepo/InternalAllTheThings.git",
+      "commit": "203bb0c0b290bf7c9158c32d43523b8d66f292c1",
+      "license": "No license file (all rights reserved); local use only"
+    },
+    "gtfobins": {
+      "repo": "https://github.com/GTFOBins/GTFOBins.github.io.git",
+      "commit": "acd524623f9c406acedd2754ebd9c2431f3675ad",
+      "license": "GPL-3.0"
+    },
+    "lolbas": {
+      "repo": "https://github.com/LOLBAS-Project/LOLBAS.git",
+      "commit": "2056cb7662509dc998fc6ce79636aec4e6c0397f",
+      "license": "GPL-3.0"
+    }
+  }
+}

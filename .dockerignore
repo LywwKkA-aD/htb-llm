@@ -1,0 +1,10 @@
+.git
+.env
+data
+node_modules
+web/dist
+tests/.data
+tests/report
+tests/results
+*.log
+.DS_Store

@@ -1,0 +1,9 @@
+// Пример плагина мока (переименуй в *.mjs). Директива [[example:hello]] → короткий ответ.
+export async function handle({ kind, userText, promptTokens, res, h }) {
+  if (kind !== "agent" || !userText.includes("[[example:hello]]")) return false;
+  h.requests.push({ kind: "agent", body: {} });
+  res.writeHead(200, { "Content-Type": "text/event-stream" });
+  await h.streamText(res, "content", "Привет из плагина.", 0, 6);
+  await h.finish(res, "stop", promptTokens, 5);
+  return true;
+}

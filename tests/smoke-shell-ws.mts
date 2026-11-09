@@ -1,0 +1,11 @@
+import WebSocket from "ws";
+const ws = new WebSocket("ws://127.0.0.1:7331/ws/shell?task=s4d9o339z0");
+let got = "";
+ws.on("message", (d) => { got += d.toString(); });
+await new Promise((r) => ws.on("open", r));
+ws.send(JSON.stringify({ t: "resize", c: 100, r: 30 }));
+await new Promise((r) => setTimeout(r, 800));
+ws.send(JSON.stringify({ t: "in", d: "echo WH_SHELL_OK $((6*7)) && hostname\r" }));
+await new Promise((r) => setTimeout(r, 1200));
+console.log("shell output contains marker:", got.includes("WH_SHELL_OK 42"), "| prompt seen:", /root@task-/.test(got));
+ws.close(); process.exit(0);

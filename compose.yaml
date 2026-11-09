@@ -1,0 +1,70 @@
+name: htb-llm
+
+services:
+  # Одноразовый сервис только ради сборки образа Kali: app ждёт его завершения,
+  # поэтому обычный `docker compose up --build` готовит и приложение, и песочницу.
+  kali-image:
+    build:
+      context: ./docker/kali
+    image: ${WH_IMAGE:-htb-llm-kali:latest}
+    command: ["true"]
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: htb-llm:latest
+    depends_on:
+      kali-image:
+        condition: service_completed_successfully
+      searxng:
+        condition: service_started
+    user: "${HTB_UID:-1000}:${HTB_GID:-1000}"
+    group_add:
+      - "${DOCKER_GID:-999}"
+    ports:
+      - "127.0.0.1:${HTB_LLM_PORT:-7331}:7331"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      WH_HOST: "0.0.0.0"
+      WH_PORT: "7331"
+      WH_DATA: "/data"
+      # Абсолютный путь к ./data на хосте. docker/run.sh выставляет его автоматически.
+      WH_HOST_DATA: "${WH_HOST_DATA:?WH_HOST_DATA is required; start via ./docker/run.sh}"
+      WH_IMAGE: "${WH_IMAGE:-htb-llm-kali:latest}"
+      WH_DOCKER_SOCKET: "/var/run/docker.sock"
+      WH_SEARXNG_URL: "http://searxng:8080"
+      # Значения по умолчанию только для локального пресета. OpenRouter настраивается в веб-UI.
+      WH_LLM_URL: "${WH_LLM_URL:-http://host.docker.internal:8080/v1}"
+      WH_EMBED_URL: "${WH_EMBED_URL:-http://host.docker.internal:8081/v1}"
+      WH_SERVICES: "off"
+      WH_BROWSER_PATH: "/usr/bin/chromium"
+      HOME: "/tmp"
+    volumes:
+      - ./data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:7331/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  searxng:
+    image: searxng/searxng:latest
+    environment:
+      SEARXNG_SECRET: "${SEARXNG_SECRET:-htb-llm-local-only-change-me}"
+      SEARXNG_BASE_URL: "http://searxng:8080/"
+    volumes:
+      - ./docker/searxng:/etc/searxng:rw
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    expose:
+      - "8080"
+    restart: unless-stopped

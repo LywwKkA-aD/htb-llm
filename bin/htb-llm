@@ -1,0 +1,248 @@
+#!/usr/bin/env bash
+# HTB LLM (unofficial) — запуск/остановка хостового стека. bin/whitehat оставлен legacy-симлинком.
+#   htb-llm start        Qwen (~/ai.sh, если не запущен) + эмбеддинги (:8081) + веб (:7331), открыть браузер
+#   htb-llm stop         остановить веб и эмбеддинги (Qwen оставить — им пользуются и другие инструменты)
+#   htb-llm stop --all   ...и Qwen тоже
+#   htb-llm status
+#   htb-llm firewall [show|status|install|remove]   правила, отделяющие песочницы (мост wh0) от сервисов хоста
+set -euo pipefail
+CLI_NAME="$(basename "$0")"
+KALI_IMAGE="${WH_IMAGE:-htb-llm-kali:latest}"
+DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+LOGS="$DIR/data/logs"; mkdir -p "$LOGS"
+EMB_MODEL="${WH_EMBED_MODEL:-$HOME/models/Qwen3-Embedding-0.6B-f16.gguf}"
+LLAMA="$HOME/llama.cpp/build/bin/llama-server"
+LLM_PORT=8080 EMB_PORT=8081 WEB_PORT="${WH_PORT:-7331}"
+
+c_ok() { printf '\e[1;32m%s\e[0m\n' "$*"; }
+c_dim() { printf '\e[2m%s\e[0m\n' "$*"; }
+c_err() { printf '\e[1;31m%s\e[0m\n' "$*" >&2; }
+up() { curl -sf "http://127.0.0.1:$1/health" >/dev/null 2>&1; }
+web_up() { curl -sf "http://127.0.0.1:$WEB_PORT/api/health" >/dev/null 2>&1; }
+wait_for() { # $1 = функция проверки, $2 = порт, $3 = таймаут, $4 = имя, $5 = лог
+  for _ in $(seq 1 "$3"); do "$1" "$2" && { c_ok "  ✓ $4"; return 0; }; sleep 1; done
+  c_err "  ✗ $4 не поднялся за $3 с — см. $5"; tail -5 "$5" >&2; return 1
+}
+mem_avail_gb() { awk '/MemAvailable/{print int($2/1024/1024)}' /proc/meminfo; }
+
+start_llm() {
+  if up $LLM_PORT; then c_dim "  Qwen на :$LLM_PORT уже работает"; return; fi
+  if (( $(mem_avail_gb) < 8 )); then c_err "  свободно меньше 8 ГБ RAM ($(mem_avail_gb) ГБ) — закрой что-нибудь тяжёлое, Qwen не запускаю"; exit 1; fi
+  c_dim "  запускаю ~/ai.sh (Qwen3.8-27B-Turbo)…"
+  setsid nohup bash "$HOME/ai.sh" > "$LOGS/llm.log" 2>&1 < /dev/null & echo $! > "$LOGS/llm.pid"
+  wait_for up $LLM_PORT 240 "Qwen :$LLM_PORT" "$LOGS/llm.log"
+}
+
+start_embed() {
+  if up $EMB_PORT; then c_dim "  эмбеддинги на :$EMB_PORT уже работают"; return; fi
+  [[ -f "$EMB_MODEL" ]] || { c_err "  нет модели эмбеддингов: $EMB_MODEL"; exit 1; }
+  c_dim "  запускаю эмбеддинги (Qwen3-Embedding-0.6B, ~1.2 ГБ VRAM)…"
+  (
+    set +eu
+    [[ -n "${SETVARS_COMPLETED:-}" ]] || source /opt/intel/oneapi/setvars.sh >/dev/null 2>&1
+    # -ub = -b: при эмбеддинге вся последовательность должна влезть в один ubatch
+    ZES_ENABLE_SYSMAN=1 ONEAPI_DEVICE_SELECTOR=level_zero:0 setsid nohup "$LLAMA" \
+      -m "$EMB_MODEL" --embedding --pooling last -ngl 99 \
+      -c 8192 -b 4096 -ub 4096 --parallel 2 \
+      --host 127.0.0.1 --port $EMB_PORT -a embed > "$LOGS/embed.log" 2>&1 < /dev/null &
+    echo $! > "$LOGS/embed.pid"
+  )
+  wait_for up $EMB_PORT 90 "эмбеддинги :$EMB_PORT" "$LOGS/embed.log"
+}
+
+start_web() {
+  if web_up; then c_dim "  веб на :$WEB_PORT уже работает"; return; fi
+  cd "$DIR"
+  # пересобрать интерфейс, если исходники новее сборки
+  if [[ ! -f web/dist/index.html ]] || [[ -n "$(find web/src web/public web/index.html -newer web/dist/index.html -print -quit 2>/dev/null)" ]]; then
+    c_dim "  собираю интерфейс…"; npx vite build --config web/vite.config.ts > "$LOGS/build.log" 2>&1 || { c_err "  сборка интерфейса упала — см. $LOGS/build.log"; exit 1; }
+  fi
+  # Пересобрать образ, если его нет или Dockerfile новее образа. Старый whitehat-kali просто
+  # перетегируем: слои те же, а существующие контейнеры и кэш сборки не теряются.
+  if ! docker image inspect "$KALI_IMAGE" >/dev/null 2>&1 \
+     && [[ "$KALI_IMAGE" == "htb-llm-kali:latest" ]] \
+     && docker image inspect whitehat-kali:latest >/dev/null 2>&1; then
+    docker tag whitehat-kali:latest "$KALI_IMAGE"
+  fi
+  local need_build=0
+  if ! docker image inspect "$KALI_IMAGE" >/dev/null 2>&1; then need_build=1;
+  else
+    local created; created=$(docker image inspect -f '{{.Created}}' "$KALI_IMAGE" 2>/dev/null)
+    if [[ $(date -d "$created" +%s 2>/dev/null || echo 0) -lt $(stat -c %Y docker/kali/Dockerfile) ]]; then need_build=1; fi
+  fi
+  if (( need_build )); then
+    c_dim "  собираю образ Kali (первый раз долго, несколько ГБ)…"; docker build -t "$KALI_IMAGE" docker/kali > "$LOGS/docker-build.log" 2>&1 \
+      || { c_err "  сборка образа Kali упала — см. $LOGS/docker-build.log"; exit 1; }
+  fi
+  setsid nohup node --import tsx src/server/index.ts > "$LOGS/server.log" 2>&1 < /dev/null & echo $! > "$LOGS/server.pid"
+  wait_for web_up "$WEB_PORT" 30 "веб :$WEB_PORT" "$LOGS/server.log"
+}
+
+# ---------- изоляция песочниц от хоста ----------
+# Контейнеры задач живут в docker-сети whitehat-sbx (мост wh0, без связи между контейнерами — это делает сервер).
+# Но с wh0 всё ещё видны сервисы самого хоста, слушающие 0.0.0.0 (llama :8080, проброшенные порты других
+# контейнеров: qdrant, k3d…), и другие docker-сети. Это режут правила iptables — их ставит только root:
+#   sudo bin/whitehat firewall install   → /usr/local/sbin/whitehat-firewall + systemd-юнит whitehat-firewall.service
+FW_UNIT=whitehat-firewall.service
+FW_SCRIPT=/usr/local/sbin/whitehat-firewall
+fw_script() { # содержимое /usr/local/sbin/whitehat-firewall (apply | clear | check)
+  cat <<'FWEOF'
+#!/bin/sh
+# whitehat-agent: песочницы задач (мост wh0) не достают до сервисов хоста и других docker-сетей.
+# Интернет из песочниц работает (FORWARD wh0 -> внешний интерфейс не трогаем). Ставит: bin/whitehat firewall install
+BR=wh0
+rule() { # $1 = iptables|ip6tables, $2 = цепочка, дальше — правило
+  t=$1; c=$2; shift 2
+  case "$ACTION" in
+    apply) "$t" -C "$c" "$@" 2>/dev/null || "$t" -I "$c" "$@" ;;
+    clear) while "$t" -C "$c" "$@" 2>/dev/null; do "$t" -D "$c" "$@"; done ;;
+    check) "$t" -C "$c" "$@" 2>/dev/null || exit 1 ;;
+  esac
+}
+ACTION=${1:-apply}
+case "$ACTION" in apply|clear|check) ;; *) echo "usage: $0 apply|clear|check" >&2; exit 2 ;; esac
+# 1) любые адреса самого хоста (шлюз сети, LAN, NetBird…): llama :8080, docker-proxy проброшенных портов
+rule iptables INPUT -i "$BR" -j DROP
+# 1b) ответы на соединения, инициированные самим хостом, должны возвращаться (SOCKS в контейнере для
+#     браузера/Burp, ручной curl на адрес контейнера) — иначе SYN-ACK умирает в DROP выше.
+#     rule() вставляет через -I, поэтому это правило встанет ПЕРЕД DROP. Новые соединения контейнер->хост по-прежнему режутся.
+rule iptables INPUT -i "$BR" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+command -v ip6tables >/dev/null 2>&1 && rule ip6tables INPUT -i "$BR" -j DROP
+# 2) другие docker-сети (DNAT на проброшенные порты qdrant/searxng/k3d уходит в FORWARD на docker0/br-*)
+[ "$ACTION" = apply ] && { iptables -N DOCKER-USER 2>/dev/null || true; }
+if iptables -L DOCKER-USER -n >/dev/null 2>&1; then
+  rule iptables DOCKER-USER -i "$BR" -o docker0 -j DROP
+  rule iptables DOCKER-USER -i "$BR" -o br-+ -j DROP
+  # 3) NetBird (wt0) — личные серверы пользователя: из песочниц туда нельзя (решение пользователя 2026-11-04).
+  rule iptables DOCKER-USER -i "$BR" -o wt+ -j DROP
+  # 4) домашняя сеть и прочие частные адреса (роутер, NAS, принтеры…) — тоже нельзя, КРОМЕ VPN-туннелей для учёбы
+  #    (OpenVPN tun*, WireGuard wg*: HTB, VPN вуза). Своя цепочка: сначала «туннель → дальше», потом запреты.
+  case "$ACTION" in
+    apply)
+      iptables -N WH-SBX 2>/dev/null || true
+      iptables -F WH-SBX
+      iptables -A WH-SBX -o tun+ -j RETURN
+      iptables -A WH-SBX -o wg+ -j RETURN
+      for net in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 169.254.0.0/16; do iptables -A WH-SBX -d "$net" -j DROP; done
+      ;;
+  esac
+  if iptables -L WH-SBX -n >/dev/null 2>&1; then
+    rule iptables DOCKER-USER -i "$BR" -j WH-SBX   # clear: сначала снимаем переход, потом удаляем цепочку
+    [ "$ACTION" = check ] && { iptables -C WH-SBX -o tun+ -j RETURN 2>/dev/null || exit 1; }
+    [ "$ACTION" = clear ] && { iptables -F WH-SBX; iptables -X WH-SBX; }
+  else
+    [ "$ACTION" = check ] && exit 1
+  fi
+fi
+exit 0
+FWEOF
+}
+fw_unit() {
+  cat <<UNITEOF
+[Unit]
+Description=whitehat-agent: изоляция песочниц (мост wh0) от сервисов хоста
+After=docker.service network-pre.target
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=$FW_SCRIPT apply
+ExecStop=$FW_SCRIPT clear
+
+[Install]
+WantedBy=multi-user.target docker.service
+UNITEOF
+}
+fw_installed() { systemctl is-active --quiet "$FW_UNIT" 2>/dev/null; }
+firewall() {
+  case "${1:-show}" in
+    show)
+      c_ok "правила изоляции песочниц (мост wh0) — их применяет $FW_SCRIPT apply:"
+      cat <<'RULES'
+  iptables  -I INPUT -i wh0 -j DROP                     # сервисы самого хоста (шлюз, LAN-адрес, NetBird): llama :8080 и др.
+  iptables  -I INPUT -i wh0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+                                                        # ответы на соединения самого хоста (SOCKS в контейнере для браузера/Burp)
+  ip6tables -I INPUT -i wh0 -j DROP
+  iptables  -I DOCKER-USER -i wh0 -o docker0 -j DROP    # другие docker-сети (проброшенные порты qdrant, searxng…)
+  iptables  -I DOCKER-USER -i wh0 -o br-+ -j DROP       # ...и пользовательские сети (k3d и т.п.)
+  iptables  -I DOCKER-USER -i wh0 -o wt+ -j DROP        # NetBird (твои серверы)
+  iptables  -I DOCKER-USER -i wh0 -j WH-SBX             # цепочка WH-SBX: через tun*/wg* (HTB, VPN вуза) — можно,
+                                                        #   частные адреса (домашняя сеть 10/8, 172.16/12, 192.168/16,
+                                                        #   100.64/10, 169.254/16) мимо VPN — нельзя
+RULES
+      echo
+      if fw_installed; then c_ok "установлены: $FW_UNIT активен"; else c_err "не установлены — поставить (нужен root): sudo $DIR/bin/whitehat firewall install"; fi
+      c_dim "  интернет и VPN-туннели (tun*/wg*) из песочниц работают; домашняя сеть, NetBird и сервисы ПК закрыты"
+      ;;
+    status)
+      if fw_installed; then c_ok "firewall: $FW_UNIT активен"; else c_err "firewall: не установлен ($FW_UNIT не активен)"; exit 1; fi
+      ;;
+    install)
+      [[ $EUID -eq 0 ]] || { c_err "нужен root: sudo $DIR/bin/whitehat firewall install"; exit 1; }
+      command -v iptables >/dev/null || { c_err "нет iptables"; exit 1; }
+      # копия в /usr/local/sbin, а не ссылка в домашний каталог: root не должен исполнять файл, который правит пользователь
+      fw_script > "$FW_SCRIPT.tmp" && chmod 0755 "$FW_SCRIPT.tmp" && chown root:root "$FW_SCRIPT.tmp" && mv -f "$FW_SCRIPT.tmp" "$FW_SCRIPT"
+      fw_unit > "/etc/systemd/system/$FW_UNIT"
+      systemctl daemon-reload
+      systemctl enable "$FW_UNIT" >/dev/null 2>&1
+      systemctl restart "$FW_UNIT"
+      "$FW_SCRIPT" check && c_ok "установлено: $FW_UNIT (правила применяются при загрузке и после перезапуска docker)" \
+        || { c_err "правила не применились — см. journalctl -u $FW_UNIT"; exit 1; }
+      ;;
+    remove)
+      [[ $EUID -eq 0 ]] || { c_err "нужен root: sudo $DIR/bin/whitehat firewall remove"; exit 1; }
+      systemctl disable --now "$FW_UNIT" >/dev/null 2>&1 || true
+      [[ -x "$FW_SCRIPT" ]] && "$FW_SCRIPT" clear || true
+      rm -f "/etc/systemd/system/$FW_UNIT" "$FW_SCRIPT"
+      systemctl daemon-reload
+      c_ok "правила и $FW_UNIT удалены"
+      ;;
+    *) echo "usage: $CLI_NAME firewall [show|status|install|remove]"; exit 1 ;;
+  esac
+}
+
+kill_pidfile() {
+  local f="$LOGS/$1.pid"
+  [[ -f "$f" ]] || return 0
+  local pid; pid=$(cat "$f")
+  if kill -0 "$pid" 2>/dev/null; then kill -- -"$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true; fi
+  rm -f "$f"
+}
+
+case "${1:-start}" in
+  start)
+    c_ok "HTB LLM (unofficial): запуск"
+    if [[ " $* " == *" --web-only "* ]]; then
+      start_web
+      c_dim "  только веб: модели включаются кнопками в сайдбаре (Qwen и эмбеддинги)"
+    else
+      start_llm; start_embed; start_web
+    fi
+    c_ok "готово: http://127.0.0.1:$WEB_PORT"
+    fw_installed || c_dim "  песочницы видят сервисы хоста (llama :8080 и др.) — закрыть: sudo $DIR/bin/$CLI_NAME firewall install"
+    [[ " $* " == *" --no-open "* ]] || (xdg-open "http://127.0.0.1:$WEB_PORT" >/dev/null 2>&1 &)
+    ;;
+  stop)
+    kill_pidfile server; kill_pidfile embed
+    # npx -> tsx -> node: pid-файл ловит не всю цепочку — добиваем того, кто слушает порт веба
+    for p in $(ss -ltnpH "sport = :$WEB_PORT" 2>/dev/null | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u); do kill "$p" 2>/dev/null || true; done
+    pkill -f "llama-server.*--port $EMB_PORT" 2>/dev/null || true
+    if [[ "${2:-}" == "--all" ]]; then
+      kill_pidfile llm; pkill -x llama-server 2>/dev/null || true
+      c_ok "остановлено всё (включая Qwen)"
+    else
+      c_ok "веб и эмбеддинги остановлены (Qwen оставлен; $CLI_NAME stop --all — остановить и его)"
+    fi
+    c_dim "  контейнеры задач продолжают жить; остановить: docker stop \$(docker ps -q --filter label=whitehat.task)"
+    ;;
+  status)
+    up $LLM_PORT && c_ok "Qwen :$LLM_PORT  ✓" || c_err "Qwen :$LLM_PORT  ✗"
+    up $EMB_PORT && c_ok "эмбеддинги :$EMB_PORT  ✓" || c_err "эмбеддинги :$EMB_PORT  ✗"
+    web_up && c_ok "веб :$WEB_PORT  ✓" || c_err "веб :$WEB_PORT  ✗"
+    fw_installed && c_ok "изоляция песочниц (firewall) ✓" || c_err "изоляция песочниц от хоста не установлена: sudo $DIR/bin/$CLI_NAME firewall install"
+    echo "контейнеры задач:"; docker ps -a --filter label=whitehat.task --format '  {{.Names}}  {{.Status}}  {{.Networks}}'
+    ;;
+  firewall) firewall "${2:-show}" ;;
+  *) echo "usage: $CLI_NAME start [--no-open] [--web-only] | stop [--all] | status | firewall [show|status|install|remove]"; exit 1 ;;
+esac

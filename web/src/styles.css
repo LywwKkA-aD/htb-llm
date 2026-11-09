@@ -1,0 +1,123 @@
+@import "tailwindcss";
+@source "./";
+
+/* HTB LLM (unofficial): визуальный язык HTB Labs — плоский глубокий синий фон, лаймовый
+   акцент #9fef00, Roboto + Roboto Mono, верхняя навигационная полоса и радиусы не больше 4px. */
+@theme {
+  --font-sans: "neue-haas-unica", "Roboto", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Roboto Mono", "JetBrains Mono", ui-monospace, "DejaVu Sans Mono", monospace;
+
+  --color-bg: #0a1322;
+  --color-surface: #0e1930;
+  --color-surface-2: #131f35;
+  --color-surface-3: #22334f;
+  --color-term: #0a1220;
+  --color-fg: #f4f4f4;
+  --color-fg-2: #a4b1cd;
+  --color-dim: #8799b5;
+  --color-faint: #526177;
+  --color-accent: #9fef00;
+  --color-accent-ink: #121c2b;
+  --color-cyan: #5e94f3;
+  --color-blue: #5e94f3;
+  --color-lime: #c5f566;
+  --color-warn: #f3cb5e;
+  --color-err: #f35e5e;
+  --color-line: #1b2942;
+  --color-line-2: #263755;
+  --color-line-3: #30466b;
+
+  --shadow-glow: none;
+  --shadow-panel: none;
+  --text-shadow-glow: none;
+  /* HTB Labs использует почти прямые углы: все именованные радиусы Tailwind прижимаем к 4px. */
+  --radius-md: 4px;
+  --radius-lg: 4px;
+  --radius-xl: 4px;
+  --radius-2xl: 4px;
+
+  --animate-fadein: fadein 0.2s ease-out;
+  --animate-pop: pop 0.16s ease-out;
+  --animate-blink: blink 1.1s steps(1) infinite;
+  --animate-slidein: slidein 0.22s ease-out;
+
+  @keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  @keyframes pop { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: none; } }
+  @keyframes blink { 50% { opacity: 0; } }
+  @keyframes slidein { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
+}
+
+/* Старые arbitrary-радиусы внутри панелей приводим к тому же HTB-потолку 4px. */
+[class~="rounded-[10px]"], [class~="rounded-[14px]"], [class~="rounded-[18px]"] { border-radius: 4px; }
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-bg font-sans text-fg antialiased overflow-hidden;
+    font-size: 13.5px;
+    line-height: 1.6;
+    color-scheme: dark;
+  }
+  ::selection { background: rgb(159 239 0 / 0.28); color: #fff; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgb(135 153 181 / 0.2); border-radius: 10px; border: 3px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background: rgb(159 239 0 / 0.35); background-clip: padding-box; border: 3px solid transparent; }
+  button { cursor: pointer; }
+  input::placeholder, textarea::placeholder { color: var(--color-faint); }
+  code, kbd { font-family: var(--font-mono); }
+}
+
+/* ---------- markdown ответов (HTML генерирует react-markdown) ---------- */
+.md { word-break: break-word; }
+.md p { margin: 4px 0 10px; }
+.md ul, .md ol { margin: 4px 0 10px; padding-left: 22px; }
+.md ul { list-style: disc; }
+.md ol { list-style: decimal; }
+.md li { margin: 3px 0; }
+.md li::marker { color: #9fef00; }
+.md h1, .md h2, .md h3, .md h4 { color: var(--color-fg); margin: 16px 0 8px; font-size: 14px; font-weight: 700; }
+.md a { color: var(--color-accent); }
+.md a:hover { text-decoration: underline; }
+.md code { background: var(--color-surface-3); padding: 1px 6px; border-radius: 4px; color: var(--color-lime); font-family: var(--font-mono); font-size: 12px; }
+/* блок кода: обёртка держит кнопку «копировать» (сам <pre> прокручивается вбок и увозил бы её) и стоит выше невидимых распорок KaTeX из соседних абзацев */
+.md .code-wrap { position: relative; z-index: 1; margin: 8px 0 12px; }
+.md pre { background: var(--color-term); border: 1px solid var(--color-line-2); border-radius: 4px; padding: 12px 14px; overflow-x: auto; }
+.md pre code { background: none; padding: 0; color: var(--color-fg); font-size: 12px; }
+.md .code-wrap .copy { z-index: 1; opacity: 0; transition: opacity .15s; }
+/* видна при наведении и при фокусе с клавиатуры; после щелчка мышью фокус остаётся на кнопке — она всё равно гаснет */
+.md .code-wrap:hover .copy, .md .code-wrap .copy:focus-visible { opacity: 1; }
+.md table { border-collapse: separate; border-spacing: 0; margin: 8px 0 12px; border: 1px solid var(--color-line-2); border-radius: 4px; overflow: hidden; }
+.md th, .md td { border-bottom: 1px solid var(--color-line); padding: 5px 10px; text-align: left; }
+.md tr:last-child td { border-bottom: none; }
+.md th { color: var(--color-accent); background: var(--color-surface-2); }
+.md blockquote { border-left: 3px solid var(--color-warn); background: rgb(243 203 94 / 0.07); margin: 8px 0; padding: 6px 12px; border-radius: 0 4px 4px 0; color: var(--color-fg-2); }
+.md strong { color: #f4f4f4; }
+.md hr { border: none; height: 1px; background: var(--color-line-2); margin: 14px 0; }
+.katex { color: #f4f4f4; }
+/* длинная формула $$…$$ (KaTeX: nowrap) прокручивается сама, а не раздвигает ленту */
+.md .katex-display { overflow-x: auto; overflow-y: hidden; padding: 2px 0 4px; }
+.hljs-keyword, .hljs-built_in, .hljs-selector-tag { color: var(--color-cyan); }
+.hljs-string, .hljs-attr { color: #c5f566; }
+.hljs-comment { color: var(--color-dim); font-style: italic; }
+.hljs-number, .hljs-literal { color: var(--color-warn); }
+.hljs-variable, .hljs-params, .hljs-title { color: #a4b1cd; }
+.hljs-meta { color: var(--color-fg-2); }
+
+/* ---------- xterm ---------- */
+/* Отступы — на самом .xterm, НЕ на родителе: FitAddon считает rows/cols по высоте родителя минус padding
+   элемента терминала. Padding родителя он не видит — rows завышались на ~строку, и последняя строка
+   наполовину уезжала за нижний край панели. */
+.term-body .xterm { height: 100%; padding: 8px 4px 8px 12px; }
+.term-body .xterm-viewport { background: transparent !important; }
+.term-body .xterm-viewport::-webkit-scrollbar-thumb { background: rgb(135 153 181 / 0.25); }
+
+/* details без системного маркера */
+details > summary { list-style: none; }
+details > summary::-webkit-details-marker { display: none; }
+.caret::after { content: "▋"; color: var(--color-accent); animation: blink 1s steps(1) infinite; margin-left: 2px; }
+
+/* уважать системное «уменьшить движение» (и детерминированные e2e) */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
+}

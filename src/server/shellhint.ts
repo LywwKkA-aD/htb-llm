@@ -1,0 +1,77 @@
+// Детект пойманного reverse shell в выводе job (пакет 3, п.13): модель годами поллила пустой
+// листенер и пропускала момент прилёта, а заметив — теряла раунды на стабилизацию. Сервер смотрит
+// дельту job_output детерминированно: строка подключения листенера (OpenBSD nc: «Connection received
+// on IP PORT», traditional nc: «connect to [..] from .. [IP]», ncat/socat аналогично), meterpreter-
+// сессия msf или — только для job с листенер-командой — чужой шелл-промпт. Подсказка одна на каждое
+// подключение (дедуп по подписи ip:port/промпта в памяти процесса), свой root-bash в job не триггерит.
+// Отключается WH_SHELL_HINTS=off.
+
+type Kind = "unix" | "windows" | "meterpreter";
+type Catch = { sig: string; kind: Kind; evidence: string };
+
+const CONNECT_RES: { rx: RegExp; sig: (m: RegExpExecArray) => string }[] = [
+  { rx: /Connection received on (\d+\.\d+\.\d+\.\d+)\s+(\d+)/, sig: (m) => `conn:${m[1]}:${m[2]}` },
+  { rx: /connect to \[[^\]]+\] from [^\n]*\[(\d+\.\d+\.\d+\.\d+)\]\s*(\d+)?/i, sig: (m) => `conn:${m[1]}:${m[2] ?? ""}` },
+  { rx: /Ncat: Connection from (\d+\.\d+\.\d+\.\d+)(?::(\d+))?/i, sig: (m) => `conn:${m[1]}:${m[2] ?? ""}` },
+  { rx: /accepting connection from (?:AF=\d+ )?(\d+\.\d+\.\d+\.\d+)[:\s](\d+)?/i, sig: (m) => `conn:${m[1]}:${m[2] ?? ""}` },
+];
+const METERPRETER_RE = /(Meterpreter session \d+ opened|Sending stage[^\n]*Meterpreter)/i;
+const WIN_PROMPT_RE = /(?:^|\n)\s*(?:PS\s+)?[A-Z]:\\[^\n>]*>\s?$/m;
+const WIN_BANNER_RE = /Microsoft Windows \[Version/i;
+const UNIX_PROMPT_RE = /(?:^|\n)([a-z_][a-z0-9_-]*)@([a-z0-9._-]+):[^\n]*[$#]\s?$/m;
+const SHELL_VER_PROMPT_RE = /(?:^|\n)((?:sh|bash)-\d+\.\d+\$)\s?$/m;
+const LISTENER_CMD_RE = /\b(nc|ncat|netcat|socat|msfconsole|pwncat|penelope|rlwrap)\b/i;
+
+const evidenceLine = (text: string, idx: number) => {
+  const a = text.lastIndexOf("\n", idx) + 1;
+  const b = text.indexOf("\n", idx);
+  return text.slice(a, b < 0 ? undefined : b).trim().slice(0, 140);
+};
+
+export function detectCatch(text: string, listenerLike: boolean): Catch | null {
+  const met = METERPRETER_RE.exec(text);
+  if (met) return { sig: `msf:${met[1].toLowerCase()}`, kind: "meterpreter", evidence: evidenceLine(text, met.index) };
+  for (const { rx, sig } of CONNECT_RES) {
+    const m = rx.exec(text);
+    if (m) {
+      const kind: Kind = WIN_BANNER_RE.test(text) || WIN_PROMPT_RE.test(text) ? "windows" : "unix";
+      return { sig: sig(m), kind, evidence: evidenceLine(text, m.index) };
+    }
+  }
+  if (!listenerLike) return null;
+  const win = WIN_PROMPT_RE.exec(text);
+  if (win) return { sig: `winprompt:${evidenceLine(text, win.index)}`, kind: "windows", evidence: evidenceLine(text, win.index) };
+  const ver = SHELL_VER_PROMPT_RE.exec(text);
+  if (ver) return { sig: `prompt:${ver[1]}`, kind: "unix", evidence: evidenceLine(text, ver.index) };
+  const unix = UNIX_PROMPT_RE.exec(text);
+  if (unix && unix[1] !== "root") return { sig: `prompt:${unix[1]}@${unix[2]}`, kind: "unix", evidence: evidenceLine(text, unix.index) };
+  return null;
+}
+
+const seen = new Map<string, Set<string>>();
+
+// Подсказка для приклеивания к выводу job_output или "" (ничего нового не прилетело / уже подсказывали).
+export function shellCatchHint(taskId: string, job: { id: string; name: string; command: string }, text: string): string {
+  if (process.env.WH_SHELL_HINTS === "off" || !text) return "";
+  try {
+    const c = detectCatch(text, LISTENER_CMD_RE.test(job.command ?? ""));
+    if (!c) return "";
+    const key = `${taskId}:${job.id}`;
+    let set = seen.get(key);
+    if (!set) {
+      if (seen.size > 100) seen.delete(seen.keys().next().value as string);
+      set = new Set();
+      seen.set(key, set);
+    }
+    if (set.has(c.sig)) return "";
+    set.add(c.sig);
+    if (set.size > 10) set.delete(set.values().next().value as string);
+    if (c.kind === "meterpreter")
+      return `[похоже, в job «${job.name}» открылась meterpreter-сессия (${c.evidence}). Проверь через job_input: getuid и sysinfo — шелл засчитан только по выводу getuid. Запиши доступ в profile_update kind=access и двигай пункт плана.]`;
+    if (c.kind === "windows")
+      return `[похоже, в job «${job.name}» прилетел Windows-shell (${c.evidence}). Проверь через job_input: whoami; hostname; ipconfig — шелл засчитан только по выводу whoami, один коннект ещё не доказательство. Запиши доступ в profile_update kind=access.]`;
+    return `[похоже, в job «${job.name}» прилетел reverse shell (${c.evidence}). Сразу: 1) job_input «id; hostname; pwd» — шелл засчитан только когда виден вывод id, один коннект ещё не доказательство; 2) стабилизируй TTY: python3 -c 'import pty;pty.spawn("/bin/bash")' (нет python3 — script -qc /bin/bash /dev/null), затем export TERM=xterm SHELL=/bin/bash и stty rows 40 cols 160 — полноценный raw через Ctrl+Z тут недоступен, job_input шлёт строки; если шелл останется неудобным, подними второй листенер на socat с tty; 3) запиши доступ в profile_update kind=access и отметь пункт плана.]`;
+  } catch {
+    return "";
+  }
+}
