@@ -1694,10 +1694,10 @@ const browserName = (taskId: string) => `whitehat-browser-${taskId}`;
 const browserPhase = new Map<string, { phase: BrowserPhase; error?: string }>();
 
 async function browserUrl(taskId: string): Promise<string | undefined> {
+  // Только опубликованный 127.0.0.1: Selkies требует secure context (WebCodecs/WebRTC), а bridge-IP
+  // по HTTP браузер доверенным не считает и показывает «requires a secure connection (HTTPS)».
   const pub = await publishedPort(taskId, cfg.browserPort);
-  if (pub) return `http://127.0.0.1:${pub}/`;
-  const ip = await containerIp(taskId); // Linux-хост без публикации: bridge-адрес панели
-  return ip ? `http://${ip}:${cfg.browserPort}/` : undefined;
+  return pub ? `http://127.0.0.1:${pub}/` : undefined;
 }
 
 export async function browserStatus(taskId: string): Promise<BrowserStatus> {
@@ -1708,7 +1708,14 @@ export async function browserStatus(taskId: string): Promise<BrowserStatus> {
     return { running: false, phase: st.phase, image: cfg.browserImage };
   let running = false;
   try { running = (await docker.getContainer(browserName(taskId)).inspect()).State.Running; } catch { /* сайдкара нет */ }
-  if (running) return { running, phase: "running", url: await browserUrl(taskId), image: cfg.browserImage };
+  if (running) {
+    const url = await browserUrl(taskId);
+    if (url) return { running, phase: "running", url, image: cfg.browserImage };
+    // Сайдкар жив, но у контейнера задачи нет опубликованного порта панели (старая спека):
+    // по bridge-адресу Selkies не заработает (secure context) — нужен пересоздающий старт.
+    return { running: false, phase: "error", image: cfg.browserImage,
+      error: "контейнер задачи создан старой версией без опубликованного порта браузера — выключи и включи браузер: контейнер пересоздастся (файлы /work сохранятся, VPN нужно подключить заново)" };
+  }
   if (st?.phase === "error") return { running, phase: "error", error: st.error, image: cfg.browserImage };
   return { running, phase: "stopped", image: cfg.browserImage };
 }
@@ -1742,11 +1749,12 @@ async function runBrowserStart(taskId: string) {
   await ensure(taskId);
   try {
     const info = await docker.getContainer(cname(taskId)).inspect();
-    if (!specHasPort(info, cfg.browserPort) && (await isDockerDesktop())) {
+    // Опубликованный порт нужен на любой платформе: без 127.0.0.1 Selkies упирается в secure context.
+    if (!specHasPort(info, cfg.browserPort)) {
       agentNote(taskId, "Браузер: контейнер создан старой версией без опубликованного порта панели — пересоздаю его (файлы /work сохранятся, VPN нужно подключить заново)…");
       await reset(taskId);
     }
-  } catch { /* дальше как обычно: на Linux панель доступна по bridge-адресу */ }
+  } catch { /* inspect не удался — статус честно покажет отсутствие URL */ }
   let has = true;
   try { await docker.getImage(cfg.browserImage).inspect(); } catch { has = false; }
   if (!has) {

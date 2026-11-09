@@ -35,12 +35,16 @@ test.describe("встроенный браузер задачи (Selkies)", () =
       "curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:3000/"]).toString().trim();
     expect(code).toBe("200"); // общий localhost: панель видна из самой задачи
 
-    // UI: вкладка «Браузер» показывает iframe стрима
+    // UI: вкладка «Браузер» показывает iframe стрима; внутри — живой Selkies, а не ошибка
+    // secure context (по bridge-IP Selkies отказывается работать: требует HTTPS/localhost)
     await openTask(page, ids, { tab: "browser" });
     await expect(page.getByTestId("browser-panel")).toBeVisible();
     await expect(page.getByTestId("browser-status")).toHaveAttribute("data-phase", "running");
     await expect(page.getByTestId("browser-frame")).toHaveAttribute("src", st.url);
     await expect(page.getByTestId("browser-stop")).toBeVisible();
+    const frame = page.frameLocator('[data-testid="browser-frame"]');
+    await expect(frame.locator("canvas").first()).toBeVisible({ timeout: 60_000 });
+    await expect(frame.locator("body")).not.toContainText("requires a secure connection");
 
     const stop = await request.post(`/api/tasks/${ids.task.id}/browser/stop`, { timeout: 60_000 });
     expect(stop.ok(), await stop.text()).toBeTruthy();
