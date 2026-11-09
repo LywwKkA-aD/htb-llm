@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Brain, Crown, Flag, KeyRound, Loader2, MessageSquare, Play, Plus, RefreshCw, Search, Settings as SettingsIcon, Square, Terminal as TermIcon, Trash2, User } from "lucide-react";
 import { api, type Chat, type Health, type HtbMachine, type HtbStatus, type Preset, type ServiceInfo, type Task } from "../api";
-import { Badge, Button, Dot, Field, Input, Modal, Panel, cx, useConfirm, useToast } from "../ui";
+import { Badge, Button, Dot, Field, Input, Modal, cx, useConfirm, useToast } from "../ui";
 import { SettingsDialog } from "./Settings";
 
 // Вкл/выкл локальных моделей прямо из интерфейса (Qwen LLM и эмбеддинги): те же процессы, что bin/whitehat.
@@ -273,7 +273,8 @@ export function Sidebar(p: Props) {
   const st = (v?: boolean) => (v === undefined ? "off" : v ? "ok" : "bad") as "ok" | "bad" | "off";
 
   return (
-    <Panel className="flex flex-col" data-testid="sidebar">
+    // flush-рейка на всю высоту, как левая навигация HTB Labs: без карточки и внешних отступов
+    <section className="flex min-h-0 w-[272px] flex-none flex-col border-r border-line bg-bg" data-testid="sidebar">
       {/* статус инфраструктуры; бренд и глобальный поиск живут в верхней HTB-полосе App */}
       <div className="px-4 pt-3 pb-3">
         <div className="flex flex-wrap gap-1.5">
@@ -317,12 +318,11 @@ export function Sidebar(p: Props) {
                 aria-current={sel}
                 onClick={() => p.onTask(t.id)}
                 className={cx(
-                  "relative block w-full rounded-[10px] px-3 py-2 text-left transition-colors",
-                  sel ? "bg-accent/[0.09]" : "hover:bg-surface-2",
+                  "relative block w-full rounded-lg px-3 py-2 text-left transition-colors",
+                  sel ? "bg-surface-2" : "hover:bg-surface-2",
                 )}
               >
-                {sel && <span className="absolute top-2.5 bottom-2.5 left-0 w-[3px] rounded-full bg-accent shadow-glow" />}
-                <div className={cx("truncate text-[13px]", sel ? "text-accent" : "text-fg")} title={t.title}>{t.title}</div>
+                <div className={cx("truncate text-[13px]", sel ? "font-medium text-fg" : "text-fg-2")} title={t.title}>{t.title}</div>
                 <div className="mt-0.5 flex items-center gap-2 text-[11px] text-dim">
                   <Dot state={t.container === "running" ? "ok" : t.container === "stopped" ? "mid" : "off"} title={`контейнер: ${t.container}`} />
                   {t.course && <span className="truncate" title={t.course}>{t.course}</span>}
@@ -341,7 +341,7 @@ export function Sidebar(p: Props) {
                       aria-current={c.id === p.chatId}
                       className={cx(
                         "group flex items-center gap-2 rounded-lg pr-2.5 text-[12.5px] transition-colors",
-                        c.id === p.chatId ? "bg-surface-3 text-accent" : "text-fg-2 hover:bg-surface-2 hover:text-fg",
+                        c.id === p.chatId ? "bg-surface-3 text-fg" : "text-fg-2 hover:bg-surface-2 hover:text-fg",
                       )}
                     >
                       <button
@@ -396,6 +396,6 @@ export function Sidebar(p: Props) {
         </Button>
       </div>
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} onSaved={() => setSettingsTick((v) => v + 1)} />
-    </Panel>
+    </section>
   );
 }

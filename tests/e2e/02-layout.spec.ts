@@ -5,10 +5,12 @@ const VIEWPORTS = [
   { width: 1600, height: 900 },
   { width: 1920, height: 1080 },
 ];
-const GAP = 10; // внешний отступ и промежутки между панелями
+const GAP = 10; // внутренние промежутки окон терминалов
+const PAD = 16; // поля контента и промежутки между карточками (gap-4/p-4), как карточки HTB Labs
 const SIDEBAR_W = 272;
 const STATUS_H = 28;
 const HEADER_H = 56;
+const TOPBAR_H = 64; // верхняя полоса приложения как в HTB Labs
 
 test.describe("раскладка и отступы", () => {
   let ids: Ids;
@@ -23,20 +25,22 @@ test.describe("раскладка и отступы", () => {
         await openTask(page, ids);
       });
 
-      test("три панели: внешние отступы и промежутки 10px, одинаковая высота, статус-бар внизу", async ({ page }) => {
+      test("сайдбар flush-рейкой, карточки с полями 16px, статус-бар внизу", async ({ page }) => {
         const side = await box(page.getByTestId("sidebar"));
         const main = await box(page.getByTestId("main-panel"));
         const rp = await box(page.getByTestId("right-panel"));
         const status = await box(page.getByTestId("statusbar"));
 
-        expectNear(side.x, GAP, "сайдбар: отступ слева");
+        expectNear(side.x, 0, "сайдбар: flush к левому краю, как навигация HTB Labs");
         expectNear(side.width, SIDEBAR_W, "сайдбар: ширина");
-        expectNear(main.x - right(side), GAP, "промежуток сайдбар → чат");
-        expectNear(rp.x - right(main), GAP, "промежуток чат → правая панель");
-        expectNear(right(rp), vp.width - GAP, "правая панель: отступ справа");
-        for (const [name, p] of [["сайдбар", side], ["чат", main], ["правая панель", rp]] as const) {
-          expectNear(p.y, 56 + GAP, `${name}: отступ под HTB-полосой`);
-          expectNear(bottom(p), status.y - GAP, `${name}: отступ до статус-бара`);
+        expectNear(main.x - right(side), PAD, "промежуток сайдбар → чат");
+        expectNear(rp.x - right(main), PAD, "промежуток чат → правая панель");
+        expectNear(right(rp), vp.width - PAD, "правая панель: отступ справа");
+        expectNear(side.y, TOPBAR_H, "сайдбар: сразу под верхней полосой");
+        expectNear(bottom(side), status.y, "сайдбар: flush до статус-бара");
+        for (const [name, p] of [["чат", main], ["правая панель", rp]] as const) {
+          expectNear(p.y, TOPBAR_H + PAD, `${name}: отступ под HTB-полосой`);
+          expectNear(bottom(p), status.y - PAD, `${name}: отступ до статус-бара`);
         }
         expectNear(status.height, STATUS_H, "статус-бар: высота");
         expectNear(bottom(status), vp.height, "статус-бар прижат к низу");
@@ -77,7 +81,7 @@ test.describe("раскладка и отступы", () => {
         for (const id of ["composer-input", "send", "attach", "effort", "composer-bar"]) await expectInside(page.getByTestId(id), composer, id);
         await expectNoOverflowX(page.getByTestId("composer-bar"), "панель кнопок поля ввода");
         await expectNoOverlap(page.getByTestId("effort"), page.getByTestId("send"), "переключатель размышлений и кнопка отправки");
-        // кнопка отправки круглая 38×38 и прижата к правому краю с внутренним отступом 16px
+        // кнопка отправки квадратная 38×38 (радиус контрола HTB — 4px) и прижата к правому краю с внутренним отступом 16px
         const s = await box(page.getByTestId("send"));
         expectNear(s.width, 38, "кнопка отправки: ширина"); expectNear(s.height, 38, "кнопка отправки: высота");
         expectNear(right(c) - right(s), 16 + 1, "кнопка отправки: отступ справа", 1.5);
@@ -126,13 +130,14 @@ test.describe("раскладка и отступы", () => {
     });
   }
 
-  test("тема HTB Labs: Roboto, тёмно-синий фон #0a1322, лаймовый акцент #9fef00", async ({ page }) => {
+  test("тема HTB Labs: Roboto, фон приложения #141d2b, лаймовый акцент #9fef00", async ({ page }) => {
     await openTask(page, ids);
     const font = await page.evaluate(() => getComputedStyle(document.body).fontFamily);
     expect(font).toContain("Roboto");
-    expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe("rgb(10, 19, 34)");
+    // точные значения из CSS-темы HTBTheme на app.hackthebox.com: .v-application background #141d2b
+    expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe("rgb(20, 29, 43)");
     const sendBg = await page.getByTestId("send").evaluate((el) => getComputedStyle(el).backgroundColor);
-    expect(["rgb(159, 239, 0)", "rgb(34, 51, 79)"]).toContain(sendBg); // акцент или «неактивно» (surface-3)
+    expect(["rgb(159, 239, 0)", "rgb(44, 56, 74)"]).toContain(sendBg); // акцент или «неактивно» (surface-3 #2c384a)
     await page.getByTestId("composer-input").fill("x");
     await expect.poll(() => page.getByTestId("send").evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgb(159, 239, 0)");
     // шрифты реально загружены, а не подменены запасными
@@ -158,8 +163,8 @@ test.describe("раскладка и отступы", () => {
     const main = await box(page.getByTestId("main-panel"));
     const rp = await box(page.getByTestId("right-panel"));
     expect(main.width, "чат не сжимается меньше 480px").toBeGreaterThanOrEqual(479);
-    expectNear(rp.x - right(main), GAP, "промежуток сохраняется после перетаскивания");
-    expectNear(right(rp), 1600 - GAP, "правая панель не вылезает за экран");
+    expectNear(rp.x - right(main), PAD, "промежуток сохраняется после перетаскивания");
+    expectNear(right(rp), 1600 - PAD, "правая панель не вылезает за экран");
 
     await drag(1300); // и вправо
     const narrowed = await box(page.getByTestId("right-panel"));

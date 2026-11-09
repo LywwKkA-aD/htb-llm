@@ -6,7 +6,7 @@ import { api, wsUrl } from "../api";
 import { Button, Dot, cx, isModalOpen } from "../ui";
 
 const theme = {
-  background: "#0f1623", foreground: "#d9e2f2", cursor: "#9fef00", cursorAccent: "#0f1623", selectionBackground: "#40600088",
+  background: "#101927", foreground: "#d9e2f2", cursor: "#9fef00", cursorAccent: "#101927", selectionBackground: "#40600088",
   black: "#151f2e", brightBlack: "#526177", red: "#f35e5e", brightRed: "#f66f6f", green: "#9fef00", brightGreen: "#c5f566",
   yellow: "#f3cb5e", brightYellow: "#f6d26f", blue: "#5e94f3", brightBlue: "#6fa1f6", magenta: "#c06ff6", brightMagenta: "#d199f9",
   cyan: "#6ff6d2", brightCyan: "#8ff8dd", white: "#d9e2f2", brightWhite: "#f4f4f4",
@@ -92,15 +92,10 @@ function Pane({ testid, title, subtitle, state, hidden, rootHidden, grow, maximi
     <div
       data-testid={testid}
       data-ws={state}
-      className={cx(rootHidden ? "hidden" : "flex", "min-h-0 flex-col overflow-hidden rounded border border-line-2 bg-term")}
+      className={cx(rootHidden ? "hidden" : "flex", "min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-term")}
       style={{ flex: hidden || rootHidden ? "0 0 auto" : grow }}
     >
       <div className="flex h-9 flex-none items-center gap-2.5 border-b border-line bg-surface-2 px-3">
-        <span className="flex gap-1.5" aria-hidden>
-          <i className="block size-[9px] rounded-full bg-[#5a2b2b]" />
-          <i className="block size-[9px] rounded-full bg-[#5a4a22]" />
-          <i className="block size-[9px] rounded-full bg-[#23552f]" />
-        </span>
         <Dot state={state === "open" ? "ok" : state === "closed" ? "bad" : "mid"} title={state} />
         <span className="flex-none text-[12px] font-bold text-fg">{title}</span>
         <span className="min-w-0 truncate text-[11px] text-dim" title={subtitle}>{subtitle}</span>

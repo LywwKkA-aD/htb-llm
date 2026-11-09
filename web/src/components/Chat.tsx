@@ -372,7 +372,7 @@ export function ChatView({ task, chat, ctxWindow, reasoning, memVersion, onChang
           <span className="text-[11px] whitespace-nowrap text-dim" data-testid="ctx-label">ctx {fmtK(promptTokens)} / {Math.round(ctxWindow / 1024)}K</span>
           <div className="relative h-1.5 w-28 rounded-full border border-line-2 bg-term" data-testid="ctx-meter" data-tokens={promptTokens}>
             <div
-              className={cx("absolute inset-y-0 left-0 rounded-full transition-[width] duration-500", promptTokens > COMPACT_AT ? "bg-gradient-to-r from-[#a07a12] to-warn" : "bg-gradient-to-r from-[#6db800] to-accent")}
+              className={cx("absolute inset-y-0 left-0 rounded-full transition-[width] duration-500", promptTokens > COMPACT_AT ? "bg-warn" : "bg-accent")}
               style={{ width: `${pct}%` }}
             />
             <div className="absolute -inset-y-1 w-0.5 rounded bg-warn/80" style={{ left: `${(COMPACT_AT / ctxWindow) * 100}%` }} />
@@ -439,8 +439,8 @@ export function ChatView({ task, chat, ctxWindow, reasoning, memVersion, onChang
           onDragLeave={() => setDragOver(false)}
           onDrop={(e) => { e.preventDefault(); setDragOver(false); addImages(e.dataTransfer.files); }}
           className={cx(
-            "@container mx-auto max-w-[900px] rounded border bg-surface-2 px-4 pt-3 pb-2.5 transition",
-            dragOver ? "border-dashed border-accent" : "border-line-2 focus-within:border-accent/40 focus-within:ring-[3px] focus-within:ring-accent/10",
+            "@container mx-auto max-w-[900px] rounded-lg border bg-surface-2 px-4 pt-3 pb-2.5 transition",
+            dragOver ? "border-dashed border-accent" : "border-transparent focus-within:border-fg",
           )}
         >
           {images.length > 0 && (
@@ -501,12 +501,12 @@ export function ChatView({ task, chat, ctxWindow, reasoning, memVersion, onChang
             <span className="hidden flex-none items-center gap-1 text-[11px] whitespace-nowrap text-faint @[700px]:inline-flex" data-testid="composer-hint"><Kbd>Enter</Kbd> отправить · <Kbd>Shift+Enter</Kbd> перенос</span>
             {busy ? (
               <button onClick={stop} data-testid="stop" title="остановить"
-                className="flex size-[38px] flex-none items-center justify-center rounded-full border border-err/45 bg-err/10 text-err transition hover:bg-err/20 hover:shadow-[0_0_14px_rgb(255_107_107/0.35)]">
+                className="flex size-[38px] flex-none items-center justify-center rounded border border-err/45 bg-err/10 text-err transition hover:bg-err/20">
                 <Square size={13} fill="currentColor" />
               </button>
             ) : (
               <button onClick={() => void send()} disabled={!text.trim() && !images.length} data-testid="send" title="отправить (Enter)"
-                className="flex size-[38px] flex-none items-center justify-center rounded-full bg-accent text-accent-ink transition hover:-translate-y-px hover:shadow-[0_0_16px_rgb(159_239_0/0.55)] disabled:translate-y-0 disabled:bg-surface-3 disabled:text-dim disabled:shadow-none">
+                className="flex size-[38px] flex-none items-center justify-center rounded bg-accent text-accent-ink transition hover:bg-[#b2f233] disabled:bg-surface-3 disabled:text-dim">
                 <ArrowUp size={18} strokeWidth={2.6} />
               </button>
             )}
@@ -538,7 +538,7 @@ function Hero({ task, onPick }: { task: Task; onPick: (t: string) => void }) {
 const UserMsg = memo(function UserMsg({ text, images }: { text: string; images?: string[] }) {
   return (
     <div className="mb-5 flex animate-fadein justify-end" data-testid="msg-user">
-      <div className="max-w-[82%] rounded border border-cyan/25 bg-cyan/[0.08] px-4 py-2.5 break-words whitespace-pre-wrap text-[#e6ecf7]">
+      <div className="max-w-[82%] rounded-lg bg-[#242f40] px-4 py-2.5 break-words whitespace-pre-wrap text-fg">
         {text}
         {images?.length ? <div className="mt-2 flex flex-wrap gap-2">{images.map((s, i) => <img key={i} src={s} className="max-h-48 max-w-64 rounded-lg border border-line-2" />)}</div> : null}
       </div>

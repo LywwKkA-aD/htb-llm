@@ -1,17 +1,19 @@
 @import "tailwindcss";
 @source "./";
 
-/* HTB LLM (unofficial): визуальный язык HTB Labs — плоский глубокий синий фон, лаймовый
-   акцент #9fef00, Roboto + Roboto Mono, верхняя навигационная полоса и радиусы не больше 4px. */
+/* HTB LLM (unofficial): визуальный язык HTB Labs. Значения взяты из реального CSS
+   app.hackthebox.com (бандл index-*.css, тема HTBTheme): фон приложения #141d2b,
+   карточка .htb-card #151f2e с радиусом 8px и бордером #212c3c, инпуты #1e2939/4px,
+   лайм #9fef00, шрифт Roboto. */
 @theme {
-  --font-sans: "neue-haas-unica", "Roboto", "Segoe UI", system-ui, sans-serif;
+  --font-sans: "Roboto", "neue-haas-unica", "Segoe UI", system-ui, sans-serif;
   --font-mono: "Roboto Mono", "JetBrains Mono", ui-monospace, "DejaVu Sans Mono", monospace;
 
-  --color-bg: #0a1322;
-  --color-surface: #0e1930;
-  --color-surface-2: #131f35;
-  --color-surface-3: #22334f;
-  --color-term: #0a1220;
+  --color-bg: #141d2b;
+  --color-surface: #151f2e;
+  --color-surface-2: #1e2939;
+  --color-surface-3: #2c384a;
+  --color-term: #101927;
   --color-fg: #f4f4f4;
   --color-fg-2: #a4b1cd;
   --color-dim: #8799b5;
@@ -23,18 +25,18 @@
   --color-lime: #c5f566;
   --color-warn: #f3cb5e;
   --color-err: #f35e5e;
-  --color-line: #1b2942;
-  --color-line-2: #263755;
-  --color-line-3: #30466b;
+  --color-line: #212c3c;
+  --color-line-2: #263243;
+  --color-line-3: #354154;
 
   --shadow-glow: none;
   --shadow-panel: none;
   --text-shadow-glow: none;
-  /* HTB Labs использует почти прямые углы: все именованные радиусы Tailwind прижимаем к 4px. */
+  /* HTB Labs: контролы (кнопки, инпуты) — 4px, карточки и панели .htb-card — 8px. */
   --radius-md: 4px;
-  --radius-lg: 4px;
-  --radius-xl: 4px;
-  --radius-2xl: 4px;
+  --radius-lg: 8px;
+  --radius-xl: 8px;
+  --radius-2xl: 16px;
 
   --animate-fadein: fadein 0.2s ease-out;
   --animate-pop: pop 0.16s ease-out;
@@ -47,8 +49,8 @@
   @keyframes slidein { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
 }
 
-/* Старые arbitrary-радиусы внутри панелей приводим к тому же HTB-потолку 4px. */
-[class~="rounded-[10px]"], [class~="rounded-[14px]"], [class~="rounded-[18px]"] { border-radius: 4px; }
+/* Старые arbitrary-радиусы карточек приводим к радиусу .htb-card — 8px. */
+[class~="rounded-[10px]"], [class~="rounded-[14px]"], [class~="rounded-[18px]"] { border-radius: 8px; }
 
 @layer base {
   html, body, #root { height: 100%; }
@@ -82,12 +84,12 @@
 .md code { background: var(--color-surface-3); padding: 1px 6px; border-radius: 4px; color: var(--color-lime); font-family: var(--font-mono); font-size: 12px; }
 /* блок кода: обёртка держит кнопку «копировать» (сам <pre> прокручивается вбок и увозил бы её) и стоит выше невидимых распорок KaTeX из соседних абзацев */
 .md .code-wrap { position: relative; z-index: 1; margin: 8px 0 12px; }
-.md pre { background: var(--color-term); border: 1px solid var(--color-line-2); border-radius: 4px; padding: 12px 14px; overflow-x: auto; }
+.md pre { background: var(--color-term); border: 1px solid var(--color-line); border-radius: 8px; padding: 12px 14px; overflow-x: auto; }
 .md pre code { background: none; padding: 0; color: var(--color-fg); font-size: 12px; }
 .md .code-wrap .copy { z-index: 1; opacity: 0; transition: opacity .15s; }
 /* видна при наведении и при фокусе с клавиатуры; после щелчка мышью фокус остаётся на кнопке — она всё равно гаснет */
 .md .code-wrap:hover .copy, .md .code-wrap .copy:focus-visible { opacity: 1; }
-.md table { border-collapse: separate; border-spacing: 0; margin: 8px 0 12px; border: 1px solid var(--color-line-2); border-radius: 4px; overflow: hidden; }
+.md table { border-collapse: separate; border-spacing: 0; margin: 8px 0 12px; border: 1px solid var(--color-line); border-radius: 8px; overflow: hidden; }
 .md th, .md td { border-bottom: 1px solid var(--color-line); padding: 5px 10px; text-align: left; }
 .md tr:last-child td { border-bottom: none; }
 .md th { color: var(--color-accent); background: var(--color-surface-2); }

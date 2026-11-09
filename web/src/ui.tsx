@@ -32,16 +32,17 @@ export const Button = forwardRef<HTMLButtonElement, BtnProps>(function Button({ 
       {...p}
       className={cx(
         "inline-flex select-none items-center justify-center gap-1.5 whitespace-nowrap rounded border font-sans font-medium transition-all duration-150",
-        "disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
+        "disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fg",
         size === "xs" && "h-6 px-2 text-[11px] rounded",
         size === "sm" && "h-7 px-2.5 text-[11.5px]",
         size === "md" && "h-8 px-3 text-[12.5px]",
         size === "icon" && "size-8",
         size === "icon-sm" && "size-7 rounded",
-        variant === "default" && "border-line-2 bg-surface-2 text-fg-2 hover:border-line-3 hover:bg-surface-3 hover:text-accent",
-        variant === "primary" && "border-accent/30 bg-accent/10 text-accent hover:bg-accent/15",
-        variant === "solid" && "border-accent bg-accent font-bold text-accent-ink hover:bg-[#b2f233]",
-        variant === "ghost" && "border-transparent bg-transparent text-fg-2 hover:bg-surface-3 hover:text-accent",
+        // варианты — как .htb-button--* в HTB Labs: secondary #242f40→#2f3b4e, primary лайм, ghost лаймовый текст
+        variant === "default" && "border-transparent bg-[#242f40] text-fg hover:bg-[#2f3b4e]",
+        variant === "primary" && "border-transparent bg-transparent text-[#b2f233] hover:bg-[#2f3b4e] hover:text-[#c5f566]",
+        variant === "solid" && "border-transparent bg-accent font-bold text-accent-ink hover:bg-[#b2f233]",
+        variant === "ghost" && "border-transparent bg-transparent text-fg-2 hover:bg-[#2f3b4e] hover:text-fg",
         variant === "danger" && "border-err/30 bg-err/10 text-err hover:bg-err/20",
         variant === "danger-solid" && "border-err bg-err font-bold text-[#2a0606] hover:bg-[#ff8a8a]",
         className,
@@ -52,7 +53,7 @@ export const Button = forwardRef<HTMLButtonElement, BtnProps>(function Button({ 
 
 // ---------- примитивы ----------
 export const Panel = ({ className, children, ...p }: { className?: string; children: ReactNode } & Record<string, unknown>) => (
-  <section {...p} className={cx("min-h-0 min-w-0 overflow-hidden rounded border border-line bg-surface", className)}>{children}</section>
+  <section {...p} className={cx("min-h-0 min-w-0 overflow-hidden rounded-lg border border-line bg-surface", className)}>{children}</section>
 );
 
 export const Dot = ({ state, title, testid }: { state: "ok" | "bad" | "mid" | "off"; title?: string; testid?: string }) => (
@@ -100,7 +101,8 @@ export function Seg<T extends string>({ value, options, onChange, size = "sm", t
   );
 }
 
-const fieldCls = "w-full rounded border border-line-2 bg-term px-3 py-2 text-fg outline-none transition focus:border-accent/45 focus:ring-[3px] focus:ring-accent/10";
+// инпут как в HTB Labs (.p-inputtext): фон #1e2939, бордер прозрачный, в фокусе — белый #f4f4f4 без кольца
+const fieldCls = "w-full rounded border border-transparent bg-surface-2 px-3 py-2 text-fg outline-none transition focus:border-fg";
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(function Input({ className, ...p }, ref) {
   return <input ref={ref} {...p} className={cx(fieldCls, "h-9", className)} />;
 });
@@ -227,7 +229,7 @@ export function Modal({ open, onClose, title, icon, children, footer, className,
     >
       <div
         ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} data-testid={testid}
-        className={cx("flex max-h-full w-full max-w-xl animate-pop flex-col rounded border border-line-2 bg-surface shadow-[0_10px_34px_rgb(0_0_0/0.5)] outline-none", className)}
+        className={cx("flex max-h-full w-full max-w-xl animate-pop flex-col rounded-lg border border-line-2 bg-surface shadow-[0_10px_34px_rgb(0_0_0/0.5)] outline-none", className)}
       >
         <div className="flex flex-none items-center gap-3 border-b border-line px-5 py-4">
           {icon}
@@ -235,7 +237,7 @@ export function Modal({ open, onClose, title, icon, children, footer, className,
           <Button variant="ghost" size="icon-sm" onClick={() => latest.current.onClose()} aria-label="закрыть" data-testid={`${testid}-close`}><X size={15} /></Button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-inset" tabIndex={-1} data-modal-body data-testid={`${testid}-body`}>{children}</div>
-        {footer && <div className="flex flex-none items-center justify-end gap-2 rounded-b border-t border-line bg-surface-2/40 px-5 py-3.5">{footer}</div>}
+        {footer && <div className="flex flex-none items-center justify-end gap-2 rounded-b-lg border-t border-line bg-surface-2/40 px-5 py-3.5">{footer}</div>}
       </div>
     </div>,
     document.body,

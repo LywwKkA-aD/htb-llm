@@ -28,10 +28,11 @@ export function Root() {
   );
 }
 
-// Ширины колонок раскладки: сайдбар, минимум чата, «удобный» минимум правой панели (шапка с вкладками
-// и кнопками контейнера целиком) и жёсткий минимум, ниже которого панель не ужимается — тогда раскладка
-// получает min-width и прокручивается по горизонтали (окна уже ~1170px), а не сминает терминалы в 170px.
-const SIDEBAR_W = 272, CHAT_MIN = 480, RIGHT_MIN = 500, RIGHT_HARD_MIN = 380, GAPS = 40;
+// Ширины колонок раскладки: сайдбар (flush-рейка как в HTB Labs), минимум чата, «удобный» минимум
+// правой панели (шапка с вкладками и кнопками контейнера целиком) и жёсткий минимум, ниже которого
+// панель не ужимается — тогда раскладка получает min-width и прокручивается по горизонтали
+// (окна уже ~1180px), а не сминает терминалы в 170px. GAPS — поля контента: p-4 по краям + gap-4.
+const SIDEBAR_W = 272, CHAT_MIN = 480, RIGHT_MIN = 500, RIGHT_HARD_MIN = 380, GAPS = 48;
 const LAYOUT_MIN_W = SIDEBAR_W + CHAT_MIN + RIGHT_HARD_MIN + GAPS;
 
 function App() {
@@ -246,7 +247,9 @@ function App() {
   useEffect(() => {
     if (!dragging) return;
     const move = (e: MouseEvent) => {
-      const w = Math.min(70, Math.max(24, ((window.innerWidth - e.clientX - 10) / window.innerWidth) * 100));
+      // процент треков сетки считается от её content-box: окно минус flush-рейка сайдбара и поля p-4
+      const gridW = window.innerWidth - SIDEBAR_W - 32;
+      const w = Math.min(70, Math.max(24, ((window.innerWidth - e.clientX - 16) / gridW) * 100));
       rightWRef.current = w;
       setRightW(w);
     };
@@ -297,8 +300,8 @@ function App() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex h-14 flex-none items-center border-b border-line bg-surface" data-testid="app-header">
-        <div className="flex h-full w-[282px] flex-none items-center gap-2.5 border-r border-line px-4">
+      <header className="flex h-16 flex-none items-center border-b border-line bg-bg" data-testid="app-header">
+        <div className="flex h-full w-[272px] flex-none items-center gap-2.5 border-r border-line px-4">
           <BrandMark size={31} />
           <div className="min-w-0 leading-none">
             <div className="text-[17px] font-bold tracking-[0.08em] whitespace-nowrap text-fg">HTB <span className="text-accent">LLM</span></div>
@@ -316,7 +319,7 @@ function App() {
                 onChange={(e) => setTaskQuery(e.target.value)}
                 placeholder="Поиск задач"
                 data-testid="task-search"
-                className="h-[34px] w-full rounded border border-transparent bg-surface-2 pr-16 pl-9 text-[12.5px] text-fg outline-none transition placeholder:text-dim focus:border-accent/45"
+                className="h-10 w-full rounded border border-transparent bg-surface-2 pr-16 pl-9 text-[12.5px] text-fg outline-none transition placeholder:text-dim focus:border-fg"
               />
               <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-[10.5px] text-faint">Ctrl + /</span>
             </label>
@@ -326,7 +329,7 @@ function App() {
           <span className="flex-1" />
           <span className="hidden max-w-72 min-w-0 truncate text-[11.5px] text-dim xl:block" title={health?.model}>{health?.model ?? ""}</span>
           <span
-            className={cx("inline-flex h-[30px] flex-none items-center gap-1.5 rounded px-3 text-[11.5px] font-bold", task && vpnIp ? "bg-accent text-accent-ink" : "bg-surface-2 text-dim")}
+            className={cx("inline-flex h-9 flex-none items-center gap-1.5 rounded px-3.5 text-[12px] font-bold", task && vpnIp ? "bg-accent text-accent-ink" : "bg-surface-2 text-dim")}
             data-testid="header-connection"
             title={task && vpnIp ? `HTB VPN подключён: ${vpnIp}` : "HTB VPN не подключён"}
           >
@@ -334,12 +337,8 @@ function App() {
           </span>
         </div>
       </header>
-      <div className="flex min-h-0 flex-1 max-[1172px]:overflow-x-auto max-[1172px]:overflow-y-hidden" data-testid="layout-scroll">
-      <div
-        className="grid min-h-0 flex-1 gap-2.5 p-2.5"
-        style={{ gridTemplateColumns: task ? `${SIDEBAR_W}px minmax(${CHAT_MIN}px,1fr) ${rightCol}` : `${SIDEBAR_W}px minmax(0,1fr)`, minWidth: task ? LAYOUT_MIN_W : undefined }}
-        data-testid="layout"
-      >
+      <div className="flex min-h-0 flex-1 max-[1180px]:overflow-x-auto max-[1180px]:overflow-y-hidden" data-testid="layout-scroll">
+      <div className="flex min-h-0 flex-1" style={{ minWidth: task ? LAYOUT_MIN_W : undefined }} data-testid="layout">
         <Sidebar
           health={health} tasks={tasks} chats={taskChats} taskId={taskId} chatId={chatId} taskQuery={searchable ? taskQuery : ""}
           onTask={selectTask} onChat={selectChat} onNewTask={() => setDialog("new")} onNewChat={() => void newChat()}
@@ -352,6 +351,10 @@ function App() {
           }}
         />
 
+      <div
+        className="grid min-h-0 flex-1 gap-4 p-4"
+        style={{ gridTemplateColumns: task ? `minmax(${CHAT_MIN}px,1fr) ${rightCol}` : "minmax(0,1fr)" }}
+      >
         <Panel className="relative" data-testid="main-panel">
           {task && chat ? (
             <ChatView key={`${task.id}:${chat.id}`} task={task} chat={chat} ctxWindow={health?.ctxWindow ?? 65536} reasoning={health?.reasoning ?? null} memVersion={memVersion}
@@ -377,13 +380,13 @@ function App() {
               aria-orientation="vertical"
               data-testid="splitter"
               onMouseDown={(e) => { e.preventDefault(); setDragging(true); }}
-              className="group absolute top-0 bottom-0 -left-[10px] z-10 flex w-2.5 cursor-col-resize justify-center"
+              className="group absolute top-0 bottom-0 -left-[13px] z-10 flex w-2.5 cursor-col-resize justify-center"
             >
               <span className={cx("my-auto h-1/3 w-0.5 rounded-full transition-all", dragging ? "h-4/5 bg-accent shadow-glow" : "bg-line-2 group-hover:h-4/5 group-hover:bg-accent/70")} />
             </div>
             {/* @container: в узкой панели у вкладок остаются только иконки (подпись — во всплывающей подсказке),
                 кнопки контейнера не сжимаются и не уезжают под overflow */}
-            <div className="@container flex h-14 flex-none items-center gap-3 overflow-hidden rounded-t border-b border-line px-2" data-testid="right-header">
+            <div className="@container flex h-14 flex-none items-center gap-3 overflow-hidden rounded-t-lg border-b border-line px-2" data-testid="right-header">
               <Seg<Tab>
                 testid="tab"
                 size="sm"
@@ -410,7 +413,7 @@ function App() {
                 <Button variant="ghost" size="icon-sm" title="пересоздать контейнер (файлы /work сохранятся)" onClick={() => void containerAct("reset")} data-testid="container-reset"><RotateCcw size={13} /></Button>
               </div>
             </div>
-            <div className={cx("min-h-0 flex-1 rounded-b", tab === "term" ? "overflow-hidden" : "overflow-y-auto")} data-testid={`tabbody-${tab}`}>
+            <div className={cx("min-h-0 flex-1 rounded-b-lg", tab === "term" ? "overflow-hidden" : "overflow-y-auto")} data-testid={`tabbody-${tab}`}>
               {tab === "term" && <Terminals key={task.id} taskId={task.id} />}
               {tab === "mem" && <MemoryPanel task={task} version={memVersion} onChanged={refresh} />}
               {tab === "lib" && <LibraryPanel task={task} />}
@@ -422,6 +425,7 @@ function App() {
             </div>
           </Panel>
         )}
+      </div>
       </div>
       </div>
 
@@ -461,12 +465,12 @@ function Welcome({ onCreate }: { onCreate: () => void }) {
   return (
     <div className="flex h-full items-center justify-center p-8" data-testid="welcome">
       <div className="max-w-[760px] animate-fadein text-center">
-        <div className="mx-auto mb-5 flex size-16 items-center justify-center rounded border border-line bg-surface-2"><BrandMark size={44} /></div>
+        <div className="mb-5 flex justify-center"><BrandMark size={56} /></div>
         <h1 className="text-[20px] font-bold text-fg">HTB LLM <span className="text-[11px] font-medium tracking-[0.18em] text-dim">UNOFFICIAL</span></h1>
         <p className="mt-2 mb-8 text-[13px] text-dim">Локальный ассистент для HackTheBox и HTB Academy: Kali, терминалы, VPN, память и RAG. Ты управляешь — модель объясняет, проверяет и показывает на практике.</p>
         <div className="mb-8 grid grid-cols-1 gap-3 text-left md:grid-cols-3">
           {feats.map((f) => (
-            <div key={f.t} className="rounded border border-line bg-surface-2 p-4">
+            <div key={f.t} className="rounded-lg border border-line bg-surface-2 p-4">
               <f.icon size={18} className="mb-2.5 text-accent" />
               <div className="mb-1 text-[13px] font-bold text-fg">{f.t}</div>
               <div className="text-[12px] leading-relaxed text-dim">{f.d}</div>
