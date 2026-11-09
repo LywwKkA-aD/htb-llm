@@ -381,7 +381,7 @@ export function ChatView({ task, chat, ctxWindow, reasoning, memVersion, onChang
       </header>
 
       {/* лента */}
-      <div ref={scroller} onScroll={onScroll} onWheel={onWheel} className="min-h-0 flex-1 overflow-y-auto px-6 pt-6 pb-3" data-testid="messages">
+      <div ref={scroller} onScroll={onScroll} onWheel={onWheel} className="min-h-0 flex-1 overflow-y-auto px-6 pt-6 pb-5" data-testid="messages">
         <div className="mx-auto max-w-[900px]">
           {empty && <Hero task={task} onPick={(t) => { setText(t); input.current?.focus(); }} />}
           {items.map((it, idx) => {

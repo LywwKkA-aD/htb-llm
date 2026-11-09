@@ -13,7 +13,7 @@ const Note = ({ children }: { children: React.ReactNode }) => (
 // ---------- карточка памяти ----------
 // те же ограничения, что у сервера (memory.ts): заголовок до 200 символов, суть до 4000
 const MEM_TITLE_MAX = 200, MEM_CONTENT_MAX = 4000;
-const selectCls = "h-9 w-36 flex-none rounded-[10px] border border-line-2 bg-term px-2 text-[12.5px] text-fg outline-none focus:border-accent/45";
+const selectCls = "h-9 w-36 flex-none rounded border border-transparent bg-surface-2 px-2 text-[12.5px] text-fg outline-none focus:border-fg";
 
 export const KIND_STYLE: Record<string, string> = {
   step: "text-cyan border-cyan/35 bg-cyan/10",
@@ -48,7 +48,7 @@ export function MemCard({ m, onDone }: { m: Memory; onDone: (id: number) => void
             </select>
             <input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} data-testid="mem-title"
               aria-label="заголовок карточки" aria-invalid={!title} maxLength={MEM_TITLE_MAX} placeholder="заголовок"
-              className="h-9 min-w-0 flex-1 rounded-[10px] border border-line-2 bg-term px-3 text-fg outline-none focus:border-accent/45 aria-[invalid=true]:border-err/50" />
+              className="h-9 min-w-0 flex-1 rounded border border-transparent bg-surface-2 px-3 text-fg outline-none focus:border-fg aria-[invalid=true]:border-err/50" />
           </div>
           <Textarea value={draft.content} onChange={(e) => setDraft({ ...draft, content: e.target.value })} rows={3} data-testid="mem-content"
             aria-label="суть карточки" aria-invalid={!content} maxLength={MEM_CONTENT_MAX} placeholder="суть: команда, адрес, вывод…" className="aria-[invalid=true]:border-err/50" />

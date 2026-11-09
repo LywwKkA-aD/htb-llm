@@ -99,7 +99,7 @@ function EndpointForm({ kind, draft, onChange, saved }: {
         </Field>
       )}
       <div className="flex items-center gap-3">
-        <Button size="sm" variant="solid" disabled={testing} onClick={() => void test()} data-testid={`set-${kind}-test`}>
+        <Button size="sm" disabled={testing} onClick={() => void test()} data-testid={`set-${kind}-test`}>
           {testing ? <Loader2 size={12} className="animate-spin" /> : <PlugZap size={12} />} проверить соединение
         </Button>
         {result && (
@@ -207,12 +207,23 @@ function OrStatsBlock({ mgmtKey, setMgmtKey, clearMgmt, setClearMgmt, savedSet }
 
       <div className="rounded border border-line bg-surface-2 px-3 py-2.5">
         <div className="flex items-center gap-2">
-          <span className="text-[12px] font-medium text-fg-2">расходы и токены аккаунта</span>
+          <span className="text-[12px] font-medium text-fg-2">
+            {stats?.scope ? "расходы и токены проекта" : "расходы и токены аккаунта"}
+          </span>
           <span className="flex-1" />
           <Button size="sm" variant="ghost" disabled={loading} onClick={() => load(true)} data-testid="or-stats-refresh">
             {loading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} обновить
           </Button>
         </div>
+        {stats && (
+          <div className="mt-1 text-[11px] leading-snug text-dim" data-testid="or-scope">
+            {stats.scope ? (
+              <>workspace ключа модели: {stats.scope.workspaces.map((w) => <span key={w.id} className="text-fg-2">«{w.name ?? w.id}»</span>).reduce<React.ReactNode[]>((a, el, i) => (i ? [...a, ", ", el] : [el]), [])} — чужие проекты аккаунта не считаются. Сводка по дням и моделям — последние 30 завершённых UTC-дней; сегодняшний расход есть в строке ключа и попадёт в сводку завтра.</>
+            ) : stats.hasManagementKey ? (
+              <>workspace ключа модели определить не удалось — сводка по всему аккаунту; проверь ключ модели в пресете OpenRouter.</>
+            ) : null}
+          </div>
+        )}
         {stats && !stats.hasInferenceKey && !stats.hasManagementKey && (
           <div className="mt-1.5 text-[11.5px] leading-snug text-dim">ключей OpenRouter пока нет: укажи ключ модели в пресете OpenRouter выше и management-ключ здесь, сохрани — статистика подтянется.</div>
         )}
@@ -242,6 +253,9 @@ function OrStatsBlock({ mgmtKey, setMgmtKey, clearMgmt, setClearMgmt, savedSet }
               </div>
             ))}
           </div>
+        )}
+        {stats?.totals && stats.totals.requests === 0 && !!stats.key && stats.key.usage > 0 && (
+          <div className="mt-1.5 text-[11.5px] leading-snug text-dim">за последние 30 завершённых дней в сводке пока пусто — ключ начал тратиться сегодня, строки по моделям и дням появятся завтра.</div>
         )}
         {!!stats?.byModel.length && (
           <table className="mt-2 w-full text-[11.5px]" data-testid="or-bymodel">

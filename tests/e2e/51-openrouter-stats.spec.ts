@@ -23,7 +23,7 @@ test.describe("статистика OpenRouter: два ключа", () => {
     return r.json();
   }
 
-  test("management-ключ хранится замаскированным; статистика агрегирует activity по моделям и дням", async ({ request }) => {
+  test("статистика только по workspace ключа модели, а не по всему аккаунту", async ({ request }) => {
     const pub = await setup(request, true);
     expect(pub.openrouterMgmt.apiKeySet).toBe(true);
     expect(JSON.stringify(pub)).not.toContain("sk-or-mgmt-123");
@@ -32,12 +32,17 @@ test.describe("статистика OpenRouter: два ключа", () => {
     expect(st.hasInferenceKey).toBe(true);
     expect(st.hasManagementKey).toBe(true);
     expect(st.errors).toEqual({});
-    expect(st.key).toMatchObject({ label: "mock-key", usage: 12.34, limit: 100 });
+    // scope: workspace инференс-ключа из /auth/key + его имя из /workspaces
+    expect(st.scope?.workspaces).toEqual([{ id: "ws-htb", name: "htb" }]);
+    // замаскированный label из /auth/key заменён именем ключа из /keys проекта
+    expect(st.key).toMatchObject({ label: "whitehat-llm", usage: 12.34, limit: 100 });
+    // итоги — только строки проекта; чужие $100/9999 запросов Default Workspace не примешаны
     expect(st.totals.cost).toBeCloseTo(4.25, 5);
     expect(st.totals.requests).toBe(270);
     expect(st.totals.promptTokens).toBe(600_000);
     expect(st.totals.reasoningTokens).toBe(12_000);
-    expect(st.periodDays).toBe(2);
+    expect(st.periodDays).toBe(30);
+    expect(st.byModel.map((m: any) => m.model)).not.toContain("other/model-x");
     expect(st.byModel[0]).toMatchObject({ model: "z-ai/glm-5.3-flash", requests: 70 });
     expect(st.byModel[0].cost).toBeCloseTo(4.0, 5);
     expect(st.byDay[0]).toMatchObject({ date: "2026-11-05", requests: 240 });
@@ -90,8 +95,11 @@ test.describe("статистика OpenRouter: два ключа", () => {
     await expect(page.getByTestId("set-or-mgmt-key")).toHaveAttribute("placeholder", /сохранён/);
     await page.getByTestId("or-stats-refresh").click();
     await expect(page.getByTestId("or-totals")).toBeVisible();
+    await expect(page.getByTestId("or-scope")).toContainText("htb");
     await expect(page.getByTestId("or-bymodel")).toContainText("z-ai/glm-5.3-flash");
+    await expect(page.getByTestId("or-bymodel")).not.toContainText("other/model-x");
     await expect(page.getByTestId("or-keys")).toContainText("whitehat-llm");
+    await expect(page.getByTestId("or-keys")).not.toContainText("default:");
     await expect(page.getByTestId("or-key-info")).toContainText("$12.34");
     await page.keyboard.press("Escape");
   });

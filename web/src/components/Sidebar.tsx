@@ -195,7 +195,7 @@ function HtbBlock({ onImportedTask }: { onImportedTask?: (taskId: string, chatId
           <form className="relative" onSubmit={(e) => { e.preventDefault(); void act("search", async () => setFound(await api.htbMachines(q))); }}>
             <Search size={13} className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-dim" />
             <input value={q} onChange={(e) => setQ(e.target.value)} aria-label="поиск машин HTB" data-testid="htb-search"
-              className="w-full rounded border border-line-2 bg-term py-1.5 pr-2.5 pl-8 text-[12px] text-fg outline-none transition focus:border-accent/45"
+              className="w-full rounded border border-transparent bg-surface-2 py-1.5 pr-2.5 pl-8 text-[12px] text-fg outline-none transition focus:border-fg"
               placeholder="машина HTB: имя + Enter" />
           </form>
           {busy === "search" && <div className="mt-1.5 flex items-center gap-2 text-[11px] text-dim"><Loader2 size={11} className="animate-spin" /> ищу…</div>}
@@ -298,13 +298,13 @@ export function Sidebar(p: Props) {
         )}
       </div>
 
-      <div className="px-3 pb-2">
+      <div className="px-2 pb-2">
         <Button variant="primary" className="w-full justify-start" onClick={p.onNewTask} data-testid="new-task">
           <Plus size={14} /> новая задача
         </Button>
       </div>
 
-      <div className="px-4 pt-1 pb-1.5 text-[10.5px] tracking-[0.14em] text-dim uppercase">задачи · {p.tasks.length}</div>
+      <div className="px-5 pt-1 pb-1.5 text-[10.5px] tracking-[0.14em] text-dim uppercase">задачи · {p.tasks.length}</div>
       <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-3" data-testid="task-list">
         {!p.tasks.length && <div className="px-3 py-2 text-[12px] text-dim">пока пусто — создай первую задачу</div>}
         {!!p.tasks.length && !tasks.length && <div className="px-3 py-2 text-[12px] text-dim" data-testid="task-search-empty">ничего не найдено</div>}

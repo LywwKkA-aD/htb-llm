@@ -103,7 +103,7 @@ export function PlanPanel({ task, onChanged }: { task: Task; onChanged?: () => v
   const doneCount = items.filter((i) => i.status === "done").length;
 
   return (
-    <div className="space-y-4 p-3" data-testid="plan-panel">
+    <div className="space-y-4 p-4" data-testid="plan-panel">
       <div className="rounded-[10px] border border-line bg-surface-2 px-3 py-2.5 text-[12px] leading-relaxed text-dim">
         {items.length > 0 ? (
           <>
@@ -151,7 +151,7 @@ export function PlanPanel({ task, onChanged }: { task: Task; onChanged?: () => v
                         onBlur={() => saveNote(i)}
                         placeholder="заметка… (Enter — сохранить)"
                         data-testid="plan-note-input"
-                        className="mt-1 h-7 w-full rounded border border-line-2 bg-term px-2 text-[11.5px] text-fg outline-none transition focus:border-accent/45 focus:ring-[3px] focus:ring-accent/10" />
+                        className="mt-1 h-7 w-full rounded border border-transparent bg-surface-2 px-2 text-[11.5px] text-fg outline-none transition focus:border-fg" />
                     </form>
                   ) : i.note ? (
                     <button type="button" title="править заметку" data-testid="plan-note"
@@ -180,7 +180,7 @@ export function PlanPanel({ task, onChanged }: { task: Task; onChanged?: () => v
 
       <form className="flex items-center gap-2" onSubmit={(e) => { e.preventDefault(); void add(); }}>
         <select value={phase} onChange={(e) => setPhase(e.target.value)} data-testid="plan-new-phase"
-          className="h-9 w-[128px] flex-none rounded border border-line-2 bg-term px-2 text-[12.5px] text-fg outline-none transition focus:border-accent/45">
+          className="h-9 w-[128px] flex-none rounded border border-transparent bg-surface-2 px-2 text-[12.5px] text-fg outline-none transition focus:border-fg">
           {orderedPhases.map((p) => <option key={p} value={p}>{p}</option>)}
         </select>
         <div className="min-w-0 flex-1">

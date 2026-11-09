@@ -261,23 +261,39 @@ const server = http.createServer(async (req, res) => {
       status: "ok",
     }));
   }
-  // OpenRouter-статистика: /auth/key — инференс-ключом; /activity и /keys — только management-ключом
+  // OpenRouter-статистика: /auth/key — инференс-ключом; /activity, /keys, /workspaces — management-ключом.
+  // Как на настоящем OpenRouter: ключ модели живёт в workspace «htb» (ws-htb), без workspace_id
+  // /activity агрегирует ВСЕ workspace аккаунта (включая чужой Default с большими расходами),
+  // а label ключа в /auth/key замаскирован — настоящее имя даёт поле name в /keys.
   if (req.method === "GET" && url.pathname === "/v1/auth/key") {
     res.writeHead(200, { "Content-Type": "application/json" });
-    return res.end(JSON.stringify({ data: { label: "mock-key", usage: 12.34, usage_daily: 0.5, usage_weekly: 2.25, usage_monthly: 5.75, limit: 100, limit_reset: null, is_free_tier: false } }));
+    return res.end(JSON.stringify({ data: { label: "sk-or-v1-...be8", workspace_id: "ws-htb", usage: 12.34, usage_daily: 0.5, usage_weekly: 2.25, usage_monthly: 5.75, limit: 100, limit_reset: null, is_free_tier: false } }));
   }
-  if (req.method === "GET" && (url.pathname === "/v1/activity" || url.pathname === "/v1/keys")) {
+  if (req.method === "GET" && (url.pathname === "/v1/activity" || url.pathname === "/v1/keys" || url.pathname === "/v1/workspaces")) {
     if (!(req.headers.authorization ?? "").includes("mgmt")) { res.writeHead(401, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ error: { message: "management key required" } })); }
     res.writeHead(200, { "Content-Type": "application/json" });
-    if (url.pathname === "/v1/activity") return res.end(JSON.stringify({ data: [
-      { date: "2026-11-04", model_permaslug: "z-ai/glm-5.3-flash", usage: 1.5, requests: 30, prompt_tokens: 90000, completion_tokens: 12000, reasoning_tokens: 5000 },
-      { date: "2026-11-05", model_permaslug: "z-ai/glm-5.3-flash", usage: 2.5, requests: 40, prompt_tokens: 110000, completion_tokens: 18000, reasoning_tokens: 7000 },
-      { date: "2026-11-05", model_permaslug: "cohere/embed-5-fast", usage: 0.25, requests: 200, prompt_tokens: 400000, completion_tokens: 0, reasoning_tokens: 0 },
+    const ws = url.searchParams.get("workspace_id");
+    if (url.pathname === "/v1/workspaces") return res.end(JSON.stringify({ data: [
+      { id: "ws-htb", name: "htb" },
+      { id: "ws-default", name: "Default Workspace" },
     ] }));
-    return res.end(JSON.stringify({ data: [
-      { label: "whitehat-llm", usage: 9.5, limit: 100, disabled: false, updated_at: "2026-11-05T10:00:00Z" },
-      { label: "whitehat-embed", usage: 2.84, limit: null, disabled: false, updated_at: "2026-11-05T09:00:00Z" },
-    ] }));
+    if (url.pathname === "/v1/activity") {
+      const project = [
+        { date: "2026-11-04", model_permaslug: "z-ai/glm-5.3-flash", usage: 1.5, requests: 30, prompt_tokens: 90000, completion_tokens: 12000, reasoning_tokens: 5000 },
+        { date: "2026-11-05", model_permaslug: "z-ai/glm-5.3-flash", usage: 2.5, requests: 40, prompt_tokens: 110000, completion_tokens: 18000, reasoning_tokens: 7000 },
+        { date: "2026-11-05", model_permaslug: "cohere/embed-5-fast", usage: 0.25, requests: 200, prompt_tokens: 400000, completion_tokens: 0, reasoning_tokens: 0 },
+      ];
+      const foreign = [
+        { date: "2026-11-05", model_permaslug: "other/model-x", usage: 100, requests: 9999, prompt_tokens: 9000000, completion_tokens: 8000000, reasoning_tokens: 7000000 },
+      ];
+      return res.end(JSON.stringify({ data: ws === "ws-htb" ? project : ws === "ws-default" ? foreign : [...project, ...foreign] }));
+    }
+    const allKeys = [
+      { name: "whitehat-llm", label: "sk-or-v1-...be8", hash: "aaa111", workspace_id: "ws-htb", usage: 12.34, limit: 100, disabled: false, updated_at: "2026-11-05T10:00:00Z" },
+      { name: "whitehat-embed", label: "sk-or-v1-...em1", hash: "bbb222", workspace_id: "ws-htb", usage: 2.84, limit: null, disabled: false, updated_at: "2026-11-05T09:00:00Z" },
+      { name: "default", label: "sk-or-v1-...b48", hash: "ccc333", workspace_id: "ws-default", usage: 999, limit: null, disabled: false, updated_at: "2026-11-05T08:00:00Z" },
+    ];
+    return res.end(JSON.stringify({ data: ws ? allKeys.filter((k) => k.workspace_id === ws) : allKeys }));
   }
   if (url.pathname === "/__requests") {
     res.writeHead(200, { "Content-Type": "application/json" });

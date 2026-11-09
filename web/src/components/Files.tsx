@@ -148,7 +148,7 @@ export function FilesPanel({ task }: { task: Task }) {
     });
 
   return (
-    <div className="space-y-4 p-3" data-testid="files-panel">
+    <div className="space-y-4 p-4" data-testid="files-panel">
       <div className="rounded-[10px] border border-line bg-surface-2 px-3 py-2.5 text-[12px] leading-relaxed text-dim">
         Файлы задачи в <span className="font-mono text-fg-2">/work</span>: сканы — <span className="font-mono text-fg-2">scans/</span>,
         эксплойты — <span className="font-mono text-fg-2">exploits/</span>, отдача цели — <span className="font-mono text-fg-2">www/</span>,

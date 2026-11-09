@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Brain, Briefcase, ChevronLeft, Crosshair, FolderOpen, Library, ListTodo, Loader2, Network, Play, Plus, RotateCcw, Search, Square, SquareTerminal, BookOpen, ShieldCheck, Wifi } from "lucide-react";
+import { Brain, Briefcase, Crosshair, FolderOpen, Library, ListTodo, Loader2, Network, Play, Plus, RotateCcw, Search, Square, SquareTerminal, BookOpen, ShieldCheck, Wifi } from "lucide-react";
 import { api, isGone, sleep, type Chat, type Health, type Task, type VpnInfo } from "./api";
 import { Sidebar } from "./components/Sidebar";
 import { ChatView, type TurnStats } from "./components/Chat";
@@ -307,7 +307,6 @@ function App() {
             <div className="text-[17px] font-bold tracking-[0.08em] whitespace-nowrap text-fg">HTB <span className="text-accent">LLM</span></div>
             <div className="mt-1 text-[8.5px] font-bold tracking-[0.22em] text-dim">UNOFFICIAL</div>
           </div>
-          <ChevronLeft size={16} className="ml-auto flex-none text-dim" />
         </div>
         <div className="flex min-w-0 flex-1 items-center gap-3 px-4">
           {searchable ? (

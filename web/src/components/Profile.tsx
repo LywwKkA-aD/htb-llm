@@ -17,7 +17,7 @@ const KIND_OPTION: Record<ProfileKind, string> = {
   fact: "факт",
 };
 
-const selectCls = "h-9 flex-none rounded border border-line-2 bg-term px-2 text-[12.5px] text-fg outline-none transition focus:border-accent/45";
+const selectCls = "h-9 flex-none rounded border border-transparent bg-surface-2 px-2 text-[12.5px] text-fg outline-none transition focus:border-fg";
 
 export function ProfilePanel({ task, onChanged }: { task: Task; onChanged?: () => void }) {
   const toast = useToast();
@@ -78,7 +78,7 @@ export function ProfilePanel({ task, onChanged }: { task: Task; onChanged?: () =
   const canAdd = kind === "service" ? form.port.trim() !== "" : kind === "cred" ? form.secret !== "" : form.text.trim() !== "";
 
   return (
-    <div className="space-y-4 p-3" data-testid="profile-panel">
+    <div className="space-y-4 p-4" data-testid="profile-panel">
       <div className="rounded-[10px] border border-line bg-surface-2 px-3 py-2.5 text-[12px] leading-relaxed text-dim">
         {items.length > 0 ? (
           <>
@@ -177,11 +177,11 @@ export function ProfilePanel({ task, onChanged }: { task: Task; onChanged?: () =
           </div>
         )}
         {kind === "cred" && (
-          <div className="flex flex-wrap gap-2">
-            <div className="min-w-[100px] flex-1"><Input value={form.service} onChange={set("service")} placeholder="сервис (ssh, wordpress…)" data-testid="profile-new-service" /></div>
-            <div className="min-w-[100px] flex-1"><Input value={form.username} onChange={set("username")} placeholder="логин" data-testid="profile-new-username" /></div>
-            <div className="min-w-[120px] flex-1"><Input value={form.secret} onChange={set("secret")} placeholder="пароль / хэш / ключ" data-testid="profile-new-secret" /></div>
-            <div className="min-w-[120px] flex-1"><Input value={form.source} onChange={set("source")} placeholder="где нашёл (источник)" data-testid="profile-new-source" /></div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="min-w-0"><Input value={form.service} onChange={set("service")} placeholder="сервис (ssh, wordpress…)" data-testid="profile-new-service" /></div>
+            <div className="min-w-0"><Input value={form.username} onChange={set("username")} placeholder="логин" data-testid="profile-new-username" /></div>
+            <div className="min-w-0"><Input value={form.secret} onChange={set("secret")} placeholder="пароль / хэш / ключ" data-testid="profile-new-secret" /></div>
+            <div className="min-w-0"><Input value={form.source} onChange={set("source")} placeholder="где нашёл (источник)" data-testid="profile-new-source" /></div>
           </div>
         )}
         {(kind === "access" || kind === "fact") && (

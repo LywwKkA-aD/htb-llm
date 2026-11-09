@@ -130,7 +130,7 @@ export function JobsPanel({ task }: { task: Task }) {
   const selected = list.find((j) => j.id === sel) ?? null;
 
   return (
-    <div className="space-y-4 p-3" data-testid="jobs-panel">
+    <div className="space-y-4 p-4" data-testid="jobs-panel">
       <div className="rounded-[10px] border border-line bg-surface-2 px-3 py-2.5 text-[12px] leading-relaxed text-dim">
         Фоновые сессии в контейнере задачи (tmux): listener reverse shell, HTTP-сервер для <span className="font-mono text-fg-2">/work/www</span>,
         интерактивный shell. Живут между ходами агента и перезагрузками страницы, пока запущен контейнер. Агент управляет ими инструментами <span className="font-mono text-fg-2">job_*</span>.
@@ -156,7 +156,7 @@ export function JobsPanel({ task }: { task: Task }) {
           </Field>
         </div>
         <Field label="команда" hint="после её завершения сессия останется интерактивным bash">
-          <Textarea rows={3} value={command} onChange={(e) => setCommand(e.target.value)} className="font-mono text-[12px]" data-testid="job-command" />
+          <Textarea rows={2} value={command} onChange={(e) => setCommand(e.target.value)} className="font-mono text-[12px]" data-testid="job-command" />
         </Field>
         <Button variant="solid" disabled={!name.trim() || !command.trim() || busy} onClick={() => void create()} data-testid="job-create">
           {busy ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />} запустить job

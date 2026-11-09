@@ -18,6 +18,7 @@ export type AgentsSettings = { subagents: boolean; maxPerTurn: number; maxRounds
 export type AppSettings = { llm: SectionPub<LlmPub>; embed: SectionPub<EndpointPub>; agents: AgentsSettings; openrouterMgmt: { apiKeySet: boolean }; embedIndex: EmbedIndexInfo; reindex: ReindexState };
 export type OrStats = {
   fetchedAt: number; hasInferenceKey: boolean; hasManagementKey: boolean;
+  scope: { workspaces: { id: string; name: string | null }[] } | null;
   key: { label: string; usage: number; usageDaily: number; usageWeekly: number; usageMonthly: number; limit: number | null; limitReset: string | null; freeTier: boolean } | null;
   totals: { cost: number; requests: number; promptTokens: number; completionTokens: number; reasoningTokens: number } | null;
   periodDays: number;
