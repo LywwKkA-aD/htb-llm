@@ -389,12 +389,31 @@ async function ensureOnce(taskId: string) {
   let c = docker.getContainer(name);
   let info: Docker.ContainerInspectInfo | null = null;
   try { info = await c.inspect(); } catch (e: any) { if (e?.statusCode !== 404) throw e; } // другие ошибки — не повод создавать заново
+  // Контейнер прямо сейчас удаляется (rm -f снаружи, наш reset): inspect ещё отвечает, но start/exec
+  // дадут 409 «marked for removal». Дождаться конца удаления и создать свежий ниже.
+  const waitGone = async () => {
+    for (let i = 0; i < 50; i++) {
+      try { await c.inspect(); } catch { return; }
+      await sleep(200);
+    }
+    try { await c.remove({ force: true }); } catch { /* ignore */ }
+    for (let i = 0; i < 25; i++) {
+      try { await c.inspect(); } catch { return; }
+      await sleep(200);
+    }
+  };
+  if (info && ((info.State as any)?.Dead || (info.State as any)?.Status === "removing")) { await waitGone(); info = null; }
   await ensureNetwork();
   if (info && !(await migrateNetwork(taskId, c, info))) info = null;
   if (info) {
     if (!info.State.Running) {
-      try { await c.start(); } catch (e: any) { if (e?.statusCode !== 304) throw e; } // 304 — уже запущен
+      try { await c.start(); } catch (e: any) {
+        if (e?.statusCode === 409) { await waitGone(); info = null; } // помечен на удаление между inspect и start
+        else if (e?.statusCode !== 304) throw e; // 304 — уже запущен
+      }
     }
+  }
+  if (info) {
     containerIds.set(taskId, info.Id);
     await ensureTunNode(c);
     await outputDir(taskId, c);

@@ -584,8 +584,9 @@ function toolHeadline(tc: ToolCall) {
 function ToolBlock({ tc, res }: { tc: ToolCall; res?: { output: string | null; ms?: number } }) {
   const out = res?.output;
   const running = out === null || out === undefined;
-  const head = out ? /^\[(exit \d+|таймаут[^\]]*)/.exec(out)?.[1] : null;
-  const bad = !!head && head !== "exit 0";
+  const head = out ? /^\[(exit \d+|таймаут[^\]]*|прервано[^\]]*)/.exec(out)?.[1] : null;
+  const stoppedByUser = !!head && head.startsWith("прервано");
+  const bad = !!head && head !== "exit 0" && !stoppedByUser;
   const preflight = !!out && out.startsWith("[нужна сверка"); // специализированный инструмент без сверки с инструкцией не выполнялся
   const spoiler = !!out && out.startsWith("[спойлер"); // политика обучения: готовое решение/writeup сервер не открыл
   const skipped = preflight || spoiler || (!!out && out.startsWith("[повтор")); // защита от зацикливания: тот же вызов не выполнялся
@@ -600,7 +601,7 @@ function ToolBlock({ tc, res }: { tc: ToolCall; res?: { output: string | null; m
         <span className="flex-none text-[11px]">
           {running ? <Loader2 size={13} className="animate-spin text-warn" />
             : skipped ? <span className="text-warn">{preflight ? "нужна инструкция · пропущен" : spoiler ? "спойлер · пропущен" : "повтор · пропущен"}</span>
-            : <span className={bad ? "text-err" : "text-dim"}>{head ?? "ok"}{res?.ms ? ` · ${(res.ms / 1000).toFixed(1)}с` : ""}</span>}
+            : <span className={bad ? "text-err" : stoppedByUser ? "text-warn" : "text-dim"}>{head ?? "ok"}{res?.ms ? ` · ${(res.ms / 1000).toFixed(1)}с` : ""}</span>}
         </span>
         <ChevronRight size={13} className="flex-none text-dim transition-transform group-open:rotate-90" />
       </summary>

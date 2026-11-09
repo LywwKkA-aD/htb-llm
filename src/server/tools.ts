@@ -473,15 +473,17 @@ export async function runTool(name: string, rawArgs: string, ctx: ToolCtx): Prom
         const r = await sandbox.runAgentCommand(ctx.taskId, command, t, ctx.signal);
         const o = r.out; // уже очищен: без ESC-последовательностей, \r-прогресс схлопнут
         const fileNote = o.saved ? `полный вывод: ${o.saved} — можно grep/sed${o.savedNote ? ` (${o.savedNote})` : ""}` : o.savedNote;
-        // первая строка — статус: интерфейс красит блок по «[exit N» / «[таймаут»
+        // первая строка — статус: интерфейс красит блок по «[exit N» / «[таймаут» / «[прервано».
+        // Прерванная пользователем команда честно подписывается прерыванием, а не голым exit 143:
+        // 143 = 128+SIGTERM нашего sweep — без подписи выглядит как загадочный сбой самой команды.
         const head = r.timedOut ? `[таймаут ${t} с, процесс остановлен]`
+          : r.aborted ? `[прервано: остановлено пользователем, ${r.secs} с]`
           : r.exitCode < 0 ? `[прервано: ${r.note ?? "код возврата неизвестен"}, ${r.secs} с]`
           : `[exit ${r.exitCode}, ${r.secs} с]`;
         const inter = interactiveHint(command);
         const inj = injectionWarning(`${o.head}\n${o.tail}`);
         const notes = [
           inj ?? "",
-          r.aborted ? "[остановлено пользователем — процессы команды завершены]" : "",
           inter ? `[подсказка: команда похожа на интерактивную/долгоживущую (${inter}). В shell она умрёт по таймауту вместе с процессом — такие вещи запускай через job_start: сессия переживёт ход, ввод — job_input, вывод — job_output]` : "",
           // модель редко сама поднимает timeout_sec: сканы регулярно умирали на дефолтных 90 с (логи чатов)
           r.timedOut && !inter ? "[подсказка: заведомо долгие команды запускай с timeout_sec до 900, а листенеры и интерактивные сессии — через job_start]" : "",

@@ -89,7 +89,8 @@ test.describe("песочница и инструменты: регрессии 
       // сразу после конца хода в контейнере ничего не осталось (ни sleep, ни вложенного timeout)
       expect(dexec(ids.task.id, `pgrep -af '${needle}' | grep -v pgrep || echo NONE`).trim()).toBe("NONE");
       const [out] = await toolOutputs(request, chat.id);
-      expect(out, out).toMatch(/^\[exit \d+, [\d.]+ с\]\n\[остановлено пользователем/);
+      // прерванная «стопом» команда подписывается прерыванием, а не голым exit 143 (128+SIGTERM sweep)
+      expect(out, out).toMatch(/^\[прервано: остановлено пользователем, [\d.]+ с\]/);
     });
   }
 
