@@ -14,8 +14,9 @@ export type LlmPub = EndpointPub & { ctxWindow: number; compactAt: number };
 export type SectionPub<T> = { active: Preset } & Record<Preset, T>;
 export type EmbedIndexInfo = { model: string; url: string; dim: number; chunks: number; stale: boolean; builtAt: number | null };
 export type ReindexState = { running: boolean; done: number; total: number; error: string | null; startedAt: number; finishedAt: number };
+export type KnowledgeState = { running: boolean; lines: string[]; error: string | null; startedAt: number; finishedAt: number };
 export type AgentsSettings = { subagents: boolean; maxPerTurn: number; maxRounds: number };
-export type AppSettings = { llm: SectionPub<LlmPub>; embed: SectionPub<EndpointPub>; agents: AgentsSettings; openrouterMgmt: { apiKeySet: boolean }; embedIndex: EmbedIndexInfo; reindex: ReindexState };
+export type AppSettings = { llm: SectionPub<LlmPub>; embed: SectionPub<EndpointPub>; agents: AgentsSettings; openrouterMgmt: { apiKeySet: boolean }; embedIndex: EmbedIndexInfo; reindex: ReindexState; knowledge: KnowledgeState };
 export type OrStats = {
   fetchedAt: number; hasInferenceKey: boolean; hasManagementKey: boolean;
   scope: { workspaces: { id: string; name: string | null }[] } | null;
@@ -126,6 +127,8 @@ export const api = {
     j<{ ok: boolean; detail: string }>("/api/settings/test", json("POST", { kind, preset, config })),
   reindexStart: () => j<ReindexState>("/api/settings/reindex", json("POST")),
   reindexStatus: () => j<{ reindex: ReindexState; embedIndex: EmbedIndexInfo }>("/api/settings/reindex"),
+  knowledgeStart: () => j<KnowledgeState>("/api/settings/knowledge", json("POST")),
+  knowledgeStatus: () => j<{ knowledge: KnowledgeState; embedIndex: EmbedIndexInfo }>("/api/settings/knowledge"),
   orStats: (refresh = false) => j<OrStats>(`/api/stats/openrouter${refresh ? "?refresh=1" : ""}`),
   services: () => j<ServiceInfo[]>("/api/services"),
   serviceAction: (id: "llm" | "embed", action: "start" | "stop") => j<ServiceInfo>(`/api/services/${id}/${action}`, json("POST")),

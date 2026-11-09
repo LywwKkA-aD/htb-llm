@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Bot, ChartColumn, CheckCircle2, Database, KeyRound, Loader2, PlugZap, RefreshCw, Settings as SettingsIcon, TriangleAlert, XCircle } from "lucide-react";
-import { api, type AgentsSettings, type AppSettings, type EmbedIndexInfo, type OrStats, type Preset, type ReindexState } from "../api";
+import { Bot, ChartColumn, CheckCircle2, Database, Download, KeyRound, Loader2, PlugZap, RefreshCw, Settings as SettingsIcon, TriangleAlert, XCircle } from "lucide-react";
+import { api, type AgentsSettings, type AppSettings, type EmbedIndexInfo, type KnowledgeState, type OrStats, type Preset, type ReindexState } from "../api";
 import { Button, Field, Input, Modal, Seg, useConfirm, useToast } from "../ui";
 
 // Общие настройки моделей: для основной LLM и эмбеддингов — пресет (локальная / OpenRouter /
@@ -119,13 +119,16 @@ function EndpointForm({ kind, draft, onChange, saved }: {
   );
 }
 
-// Состояние векторного индекса и ручная переиндексация: для внешних эмбеддингов это платные
-// запросы на каждый фрагмент, поэтому запуск — только по кнопке с подтверждением.
-function IndexBlock({ info0, reindex0 }: { info0: EmbedIndexInfo; reindex0: ReindexState }) {
+// База знаний и векторный индекс: [скачать и построить базу] качает зафиксированные источники
+// (HackTricks и др. + свои гайды) и индексирует их сохранённой моделью эмбеддингов — тот же
+// пайплайн, что ./docker/run.sh knowledge. [переиндексировать] переэмбеддит уже скачанное.
+// Для внешних эмбеддингов оба действия — платные запросы, поэтому каждое с подтверждением.
+function IndexBlock({ info0, reindex0, knowledge0 }: { info0: EmbedIndexInfo; reindex0: ReindexState; knowledge0: KnowledgeState }) {
   const toast = useToast();
   const confirm = useConfirm();
   const [info, setInfo] = useState(info0);
   const [st, setSt] = useState(reindex0);
+  const [kb, setKb] = useState(knowledge0);
   const alive = useRef(true);
   useEffect(() => { setInfo(info0); }, [info0]);
   useEffect(() => {
@@ -136,6 +139,25 @@ function IndexBlock({ info0, reindex0 }: { info0: EmbedIndexInfo; reindex0: Rein
     }, 1000);
     return () => { alive.current = false; clearInterval(t); };
   }, [st.running]);
+  useEffect(() => {
+    if (!kb.running) return;
+    const t = setInterval(() => {
+      api.knowledgeStatus().then((r) => { if (alive.current) { setKb(r.knowledge); setInfo(r.embedIndex); } }).catch(() => {});
+    }, 1000);
+    return () => clearInterval(t);
+  }, [kb.running]);
+
+  const startBuild = async () => {
+    const empty = info.chunks === 0;
+    const ok = await confirm({
+      title: empty ? "Скачать и построить базу знаний?" : "Обновить источники знаний?",
+      message: <>Сервер скачает внешние корпуса зафиксированных ревизий (HackTricks, PayloadsAllTheThings, InternalAllTheThings, GTFOBins, LOLBAS — сотни мегабайт клонов) и проиндексирует их вместе с собственными гайдами проекта <b>сохранённой</b> моделью эмбеддингов. Если ты только что поменял эмбеддинги выше — сначала нажми «сохранить» внизу. Для внешнего API эмбеддингов это платные запросы (~17 тыс. фрагментов) и несколько минут работы.</>,
+      confirmText: empty ? "скачать и построить" : "обновить источники",
+    });
+    if (!ok) return;
+    try { setKb(await api.knowledgeStart()); toast("info", "построение базы запущено — ход виден здесь, вкладку можно не закрывать"); }
+    catch (e: any) { toast("error", e.message); }
+  };
 
   const start = async () => {
     const ok = await confirm({
@@ -158,20 +180,28 @@ function IndexBlock({ info0, reindex0 }: { info0: EmbedIndexInfo; reindex0: Rein
           индекс: <span className="text-fg">{info.chunks}</span> фрагментов · вектор {info.dim} · модель «{info.model}»
         </span>
         <span className="flex-1" />
-        <Button size="sm" variant={info.stale ? "primary" : "ghost"} disabled={st.running || info.chunks === 0}
-          title={info.chunks === 0 ? "Сначала построй базу знаний: ./docker/run.sh knowledge" : undefined}
+        <Button size="sm" variant={info.chunks === 0 ? "primary" : "ghost"} disabled={kb.running || st.running}
+          onClick={() => void startBuild()} data-testid="knowledge-build">
+          {kb.running ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />} {info.chunks === 0 ? "скачать и построить базу" : "обновить источники"}
+        </Button>
+        <Button size="sm" variant={info.stale ? "primary" : "ghost"} disabled={st.running || kb.running || info.chunks === 0}
+          title={info.chunks === 0 ? "Сначала построй базу знаний кнопкой слева" : undefined}
           onClick={() => void start()} data-testid="reindex-start">
           {st.running ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} переиндексировать
         </Button>
       </div>
-      {info.chunks === 0 && !st.running && (
+      {info.chunks === 0 && !st.running && !kb.running && (
         <div className="mt-1.5 text-[11.5px] leading-snug text-dim" data-testid="embed-index-empty">
-          база знаний ещё не построена — переиндексировать нечего. Настрой эмбеддинги выше, сохрани и выполни один раз{" "}
-          <code className="rounded bg-surface-3 px-1 font-mono text-[11px] text-fg">./docker/run.sh knowledge</code>{" "}
-          (в хостовом режиме — <code className="rounded bg-surface-3 px-1 font-mono text-[11px] text-fg">pnpm knowledge</code>):
-          скачаются зафиксированные источники знаний и построится индекс.
+          база знаний ещё не построена — переиндексировать нечего. Настрой эмбеддинги выше, сохрани настройки и нажми
+          «скачать и построить базу» — сервер сам скачает зафиксированные источники знаний и построит индекс
+          (то же, что <code className="rounded bg-surface-3 px-1 font-mono text-[11px] text-fg">./docker/run.sh knowledge</code> из терминала).
         </div>
       )}
+      {(kb.running || kb.lines.length > 0) && (
+        <pre className="mt-2 max-h-28 overflow-y-auto rounded bg-term px-2 py-1.5 font-mono text-[10.5px] leading-snug break-words whitespace-pre-wrap text-dim" data-testid="knowledge-log">{kb.lines.slice(-10).join("\n")}</pre>
+      )}
+      {!!kb.error && !kb.running && <div className="mt-1.5 text-[11.5px] leading-snug text-err" data-testid="knowledge-error">ошибка построения базы: {kb.error}</div>}
+      {!kb.running && !kb.error && kb.finishedAt > 0 && <div className="mt-1.5 text-[11.5px] text-accent" data-testid="knowledge-done">база знаний построена: индекс — {info.chunks} фрагментов</div>}
       {info.stale && !st.running && (
         <div className="mt-1.5 flex items-start gap-1.5 text-[11.5px] leading-snug text-warn" data-testid="embed-index-stale">
           <TriangleAlert size={12} className="mt-px flex-none" />
@@ -365,7 +395,7 @@ export function SettingsDialog({ open, onClose, onSaved }: { open: boolean; onCl
           <section>
             <div className="mb-2 flex items-center gap-2 text-[13px] font-medium text-fg"><KeyRound size={13} className="text-accent" /> Эмбеддинги (поиск по знаниям и памяти)</div>
             <EndpointForm kind="embed" draft={embed} onChange={setEmbed} saved={saved.embed} />
-            <IndexBlock info0={saved.embedIndex} reindex0={saved.reindex} />
+            <IndexBlock info0={saved.embedIndex} reindex0={saved.reindex} knowledge0={saved.knowledge} />
             <p className="mt-2 text-[11.5px] leading-snug text-dim">
               Если у новой модели другая размерность вектора, «проверить» покажет это. Переиндексация работает
               по сохранённому активному пресету: сначала сохрани настройки, потом запускай.

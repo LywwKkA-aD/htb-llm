@@ -11,6 +11,8 @@ if [[ -d "$DATA" ]]; then docker run --rm -v "$DATA:/d" "${WH_IMAGE:-htb-llm-kal
 mkdir -p "$DATA"
 # мок-эмбеддинги — хэш слов, абсолютная близость у них бессмысленна: порог автоподклейки отключаем
 export WH_RECALL_MIN_SIM=0
+# построение базы знаний из веба в e2e — только свой гайд htb-00, без клонов внешних репозиториев
+export WH_KNOWLEDGE_ARGS="--only htb-00-methodology"
 # Механика сворачивания в e2e гоняется на компактном пороге 12K; продуктовый дефолт 32K проверяется
 # отдельным тестом на своём сервере без WH_COMPACT_AT (25-context.spec.ts).
 export WH_COMPACT_AT="${WH_COMPACT_AT:-12000}"

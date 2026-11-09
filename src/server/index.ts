@@ -103,16 +103,19 @@ app.get("/api/health", wrap(async () => {
 }));
 
 // ---------- общие настройки (модель и эмбеддинги: пресеты локальная / OpenRouter / свой API) ----------
-app.get("/api/settings", wrap(() => ({ ...publicSettings(), embedIndex: embedIndexInfo(), reindex: library.reindexState })));
+app.get("/api/settings", wrap(() => ({ ...publicSettings(), embedIndex: embedIndexInfo(), reindex: library.reindexState, knowledge: library.knowledgeState })));
 app.put("/api/settings", wrap((req) => {
   const b = (req.body ?? {}) as Record<string, unknown>;
   if (b.llm === undefined && b.embed === undefined && b.agents === undefined && b.openrouterMgmt === undefined) throw new Error("пустые настройки");
   const saved = saveSettings({ llm: b.llm, embed: b.embed, agents: b.agents, openrouterMgmt: b.openrouterMgmt });
   invalidateOrStats(); // новые адрес/ключи должны подействовать при следующем открытии статистики сразу
-  return { ...publicSettings(saved), embedIndex: embedIndexInfo(saved), reindex: library.reindexState };
+  return { ...publicSettings(saved), embedIndex: embedIndexInfo(saved), reindex: library.reindexState, knowledge: library.knowledgeState };
 }));
 app.post("/api/settings/reindex", wrap(() => library.startReindex()));
 app.get("/api/settings/reindex", wrap(() => ({ reindex: library.reindexState, embedIndex: embedIndexInfo() })));
+// Построение базы знаний из веба: тот же пайплайн, что ./docker/run.sh knowledge (скачать источники + индекс)
+app.post("/api/settings/knowledge", wrap(() => library.startKnowledgeBuild()));
+app.get("/api/settings/knowledge", wrap(() => ({ knowledge: library.knowledgeState, embedIndex: embedIndexInfo() })));
 // Статистика расходов OpenRouter (инференс-ключ + management-ключ); ?refresh=1 — мимо минутного кэша
 app.get("/api/stats/openrouter", wrap((req) => openRouterStats(req.query.refresh === "1")));
 app.post("/api/settings/test", wrap(async (req) => {

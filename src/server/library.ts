@@ -2,10 +2,12 @@
 // Поиск гибридный: вектора (смысл) + FTS5/BM25 (точные термины: -sS, RFC 791, TTL, SYN) -> RRF.
 import fs from "node:fs";
 import path from "node:path";
+import { spawn } from "node:child_process";
 import { extractText, getDocumentProxy } from "unpdf";
 import { db, now, vecBuf, embedDimState, recreateVecTable, type Doc } from "./db.ts";
 import { embed, probeEmbedDim } from "./llm.ts";
 import { activeEmbed, recordEmbedIndex } from "./settings.ts";
+import { ROOT } from "./config.ts";
 
 const CHUNK = 1400; // символов (~450 токенов русского текста)
 const OVERLAP = 200;
@@ -180,6 +182,7 @@ export const reindexState: ReindexState = { running: false, done: 0, total: 0, e
 
 export function startReindex(): ReindexState {
   if (reindexState.running) throw new Error("переиндексация уже идёт");
+  if (knowledgeState.running) throw new Error("идёт построение базы знаний — подожди его завершения");
   reindexState.running = true;
   reindexState.done = 0; reindexState.total = 0; reindexState.error = null;
   reindexState.startedAt = Date.now(); reindexState.finishedAt = 0;
@@ -214,4 +217,50 @@ async function runReindex() {
     reindexState.done += part.length;
   }
   recordEmbedIndex(act.model, act.url);
+}
+
+// ---------- построение базы знаний из веба (кнопка в настройках) ----------
+// Тот же пайплайн, что `pnpm knowledge` / `./docker/run.sh knowledge`: сервер запускает
+// scripts/knowledge.mts дочерним процессом (свои гайды из knowledge/ + внешние корпуса
+// зафиксированных в knowledge/sources.lock.json ревизий) и стримит его вывод в состояние.
+// WH_KNOWLEDGE_ARGS — необязательные доп. аргументы скрипту (например "--only hacktricks"; в e2e
+// ограничивает сборку одним своим гайдом без сети).
+export type KnowledgeState = { running: boolean; lines: string[]; error: string | null; startedAt: number; finishedAt: number };
+export const knowledgeState: KnowledgeState = { running: false, lines: [], error: null, startedAt: 0, finishedAt: 0 };
+
+export function startKnowledgeBuild(): KnowledgeState {
+  if (knowledgeState.running) throw new Error("построение базы знаний уже идёт");
+  if (reindexState.running) throw new Error("идёт переиндексация — подожди её завершения");
+  const script = path.join(ROOT, "scripts", "knowledge.mts");
+  if (!fs.existsSync(script)) throw new Error("скрипт scripts/knowledge.mts не найден в установке");
+  knowledgeState.running = true;
+  knowledgeState.lines = [];
+  knowledgeState.error = null;
+  knowledgeState.startedAt = Date.now();
+  knowledgeState.finishedAt = 0;
+  const extra = (process.env.WH_KNOWLEDGE_ARGS ?? "").split(/\s+/).filter(Boolean);
+  const child = spawn(process.execPath, ["--import", "tsx", script, ...extra], { cwd: ROOT, env: process.env });
+  const push = (buf: Buffer) => {
+    for (const line of buf.toString().split(/\r?\n/)) {
+      const t = line.trimEnd();
+      if (t) knowledgeState.lines.push(t);
+    }
+    if (knowledgeState.lines.length > 80) knowledgeState.lines.splice(0, knowledgeState.lines.length - 80);
+  };
+  child.stdout.on("data", push);
+  child.stderr.on("data", push);
+  child.on("error", (e) => {
+    knowledgeState.error = `не удалось запустить построение базы: ${e.message}`;
+    knowledgeState.running = false;
+    knowledgeState.finishedAt = Date.now();
+  });
+  child.on("close", (code) => {
+    if (code !== 0 && !knowledgeState.error) {
+      const lastErr = [...knowledgeState.lines].reverse().find((l) => /ОШИБКА|error|fatal/i.test(l));
+      knowledgeState.error = lastErr ?? `построение завершилось с кодом ${code} — детали в логе выше`;
+    }
+    knowledgeState.running = false;
+    knowledgeState.finishedAt = Date.now();
+  });
+  return knowledgeState;
 }
