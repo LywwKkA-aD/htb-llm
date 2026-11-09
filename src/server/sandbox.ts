@@ -409,9 +409,12 @@ async function ensureOnce(taskId: string) {
     Cmd: ["sleep", "infinity"],
     Env: ["TERM=xterm-256color", "LANG=C.UTF-8"],
     Labels: { "whitehat.task": taskId, "whitehat.data": DATA }, // по метке data тесты убирают только свои контейнеры
+    // SOCKS для браузера хоста публикуется сразу в спеке: bridge-IP из Docker Desktop не маршрутизируется
+    ExposedPorts: { [`${cfg.socksPort}/tcp`]: {} },
     HostConfig: {
       Binds: [`${hostPath(work)}:/work`], // daemon видит хостовый путь; внутри app-контейнера DATA может быть /data
       NetworkMode: SANDBOX_NET, // изолированная сеть: интернет есть, соседних задач и сервисов на docker0 нет
+      PortBindings: { [`${cfg.socksPort}/tcp`]: [{ HostIp: "127.0.0.1", HostPort: "" }] },
       // /dev/net/tun: OpenVPN внутри контейнера (HTB), ligolo и прочие туннели. НЕ проброс хостового
       // устройства: сервер может жить в app-контейнере без /dev/net/tun, а демон — в VM Docker Desktop,
       // поэтому проверка fs на стороне сервера врала в обоих мирах и устройство молча не добавлялось.
@@ -1476,8 +1479,14 @@ export async function vpnStatus(taskId: string): Promise<VpnStatus> {
   }
   s.state = s.ip ? "up" : pidAlive || wgSeen ? "connecting" : "down";
   if (s.socks.running) {
-    const ip = await containerIp(taskId);
-    if (ip) s.socks.url = `socks5://${ip}:${cfg.socksPort}`;
+    // Предпочтительно опубликованный на 127.0.0.1 хоста порт (работает и на Docker Desktop);
+    // bridge-IP — запасной вариант для Linux-хоста, если форвардер не поднялся.
+    const pub = await socksPublishedPort(taskId);
+    if (pub) s.socks.url = `socks5://127.0.0.1:${pub}`;
+    else {
+      const ip = await containerIp(taskId);
+      if (ip) s.socks.url = `socks5://${ip}:${cfg.socksPort}`;
+    }
   }
   return setVpnCache(taskId, s);
 }
@@ -1598,10 +1607,48 @@ export async function deleteVpnConfig(taskId: string): Promise<void> {
   });
 }
 
+// ---------- публикация SOCKS на 127.0.0.1 хоста (Docker Desktop не маршрутизирует bridge-IP) ----------
+// microsocks живёт в netns задачи (там VPN), но его bridge-адрес из Windows/macOS недоступен: Docker
+// Desktop пускает хост только в опубликованные порты. Порт публикуется в спеке самого контейнера
+// задачи при создании (127.0.0.1:<случайный> -> socksPort); сайдкар-форвардер не годится — sandbox-
+// сеть с enable_icc=false не пускает контейнеры друг к другу. Контейнеры старых версий без публикации
+// на Docker Desktop пересоздаются один раз при первом включении SOCKS; на Linux-хосте bridge-адрес
+// и так маршрутизируется, там старые контейнеры не трогаем.
+async function socksPublishedPort(taskId: string): Promise<number | null> {
+  try {
+    const i = await docker.getContainer(cname(taskId)).inspect();
+    if (!i.State.Running) return null;
+    const p = Number(i.NetworkSettings?.Ports?.[`${cfg.socksPort}/tcp`]?.[0]?.HostPort);
+    return Number.isInteger(p) && p > 0 ? p : null;
+  } catch { return null; }
+}
+
+function specHasSocksPort(info: Docker.ContainerInspectInfo): boolean {
+  const b = (info.HostConfig as any)?.PortBindings?.[`${cfg.socksPort}/tcp`];
+  return Array.isArray(b) && b.length > 0;
+}
+
+let desktopCache: Promise<boolean> | null = null;
+function isDockerDesktop(): Promise<boolean> {
+  desktopCache ??= docker.info()
+    .then((i: any) => /docker desktop/i.test(String(i?.OperatingSystem ?? "")))
+    .catch(() => true); // не узнали — безопаснее считать, что bridge-IP хосту недоступен
+  return desktopCache;
+}
+
 // SOCKS5 в контейнере на адресе eth0 (мост wh0): браузер и Burp на хосте ходят в сеть VPN через контейнер.
 // Слушает только адрес моста — со стороны туннеля (от целей) прокси не виден.
 export const startSocks = (taskId: string) => withVpnLock(taskId, async (): Promise<VpnStatus> => {
   await ensure(taskId);
+  // Старый контейнер без опубликованного SOCKS-порта: на Docker Desktop браузер до bridge-IP не дойдёт —
+  // один раз пересоздать контейнер (VPN после этого подключить заново). На Linux bridge работает как есть.
+  try {
+    const info = await docker.getContainer(cname(taskId)).inspect();
+    if (!specHasSocksPort(info) && (await isDockerDesktop())) {
+      agentNote(taskId, "SOCKS: контейнер создан старой версией без опубликованного порта для браузера — пересоздаю его (файлы /work сохранятся, VPN нужно подключить заново)…");
+      await reset(taskId);
+    }
+  } catch { /* inspect не удался — дальше как обычно, статус покажет bridge-адрес */ }
   const ip = await containerIp(taskId);
   if (!ip || !/^\d+\.\d+\.\d+\.\d+$/.test(ip)) throw new Error("не нашёл IP контейнера в сети песочниц");
   const script = [
@@ -1616,7 +1663,7 @@ export const startSocks = (taskId: string) => withVpnLock(taskId, async (): Prom
   if (err) throw new Error(err);
   vpnCache.delete(taskId);
   const st = await vpnStatus(taskId);
-  agentNote(taskId, `SOCKS5 для браузера/Burp на хосте: ${st.socks.url ?? `socks5://${ip}:${cfg.socksPort}`}`);
+  agentNote(taskId, `SOCKS5 для браузера/Burp на хосте: ${st.socks.url ?? `socks5://${ip}:${cfg.socksPort}`} (Firefox: SOCKS5 + «проксировать DNS через SOCKS»)`);
   return st;
 });
 export const stopSocks = (taskId: string) => withVpnLock(taskId, async (): Promise<VpnStatus> => {

@@ -182,7 +182,11 @@ test.describe("VPN задачи в контейнере (HTB)", () => {
       expect(on.ok(), await on.text()).toBeTruthy();
       const v = await vpnGet(request, ids.task.id);
       expect(v.status.socks.running).toBe(true);
-      expect(v.status.socks.url).toMatch(/^socks5:\/\/172\.23\.\d+\.\d+:1080$/);
+      // Опубликованный на 127.0.0.1 хоста порт самого контейнера задачи, а не bridge-IP: из Windows/macOS
+      // (Docker Desktop) bridge-адрес контейнера не маршрутизируется, опубликованный порт — везде.
+      expect(v.status.socks.url).toMatch(/^socks5:\/\/127\.0\.0\.1:\d+$/);
+      const binds = JSON.parse(execFileSync("docker", ["inspect", "-f", "{{json .HostConfig.PortBindings}}", `whitehat-${ids.task.id}`]).toString().trim() || "null");
+      expect(binds?.["1080/tcp"]?.[0]?.HostIp).toBe("127.0.0.1");
       // с хоста через SOCKS: 127.0.0.1 здесь резолвится уже внутри контейнера
       const r = spawnSync("curl", ["-s", "--max-time", "15", "--socks5-hostname", v.status.socks.url.replace("socks5://", ""), "http://127.0.0.1:18080/marker.txt"], { encoding: "utf8" });
       expect(r.stdout).toContain("WH-SOCKS-OK");
