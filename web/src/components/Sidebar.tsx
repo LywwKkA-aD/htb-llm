@@ -78,6 +78,8 @@ function HtbBlock({ onImportedTask }: { onImportedTask?: (taskId: string, chatId
   const [dlg, setDlg] = useState(false);
   const [token, setToken] = useState("");
   const [q, setQ] = useState("");
+  const [flag, setFlag] = useState("");
+  const [flagMsg, setFlagMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [found, setFound] = useState<HtbMachine[] | null>(null);
   const alive = useRef(true);
   const load = useCallback((refresh = false) => api.htbStatus(refresh).then((s) => { if (alive.current) setSt(s); }).catch(() => {}), []);
@@ -91,6 +93,19 @@ function HtbBlock({ onImportedTask }: { onImportedTask?: (taskId: string, chatId
     setBusy(key);
     try { await fn(); } catch (e: any) { toast("error", e.message); }
     setBusy(null);
+  };
+  const submitFlag = async () => {
+    const f = flag.trim();
+    if (!f) return;
+    await act("flag", async () => {
+      const r = await api.htbSubmitFlag(f, st?.activeMachine?.id);
+      setFlagMsg({ ok: r.ok, text: r.message });
+      if (r.ok) {
+        setFlag("");
+        if (r.status) setSt(r.status); else await load(true);
+        toast("success", `HTB: ${r.message}`);
+      }
+    });
   };
   const importMachine = (machineId?: number) => void act("import", async () => {
     const r = await api.htbImport(machineId);
@@ -189,6 +204,13 @@ function HtbBlock({ onImportedTask }: { onImportedTask?: (taskId: string, chatId
               onClick={async () => { if (await confirm({ title: "Остановить машину?", message: <>«{st.activeMachine!.name}» будет выключена на HTB, несохранённый прогресс на ней пропадёт.</>, confirmText: "остановить", danger: true })) void act("stop", async () => setSt(await api.htbStop())); }}>
               <Square size={10} /></Button>
           </div>
+          <form className="mt-2 flex items-center gap-1.5" onSubmit={(e) => { e.preventDefault(); void submitFlag(); }}>
+            <input value={flag} onChange={(e) => setFlag(e.target.value)} placeholder="флаг из user.txt/root.txt (32 hex)" aria-label="флаг HTB" data-testid="htb-flag-input"
+              className="min-w-0 flex-1 rounded border border-transparent bg-surface-2 px-2 py-1 font-mono text-[11px] text-fg outline-none transition focus:border-fg" />
+            <Button size="xs" variant="solid" type="submit" disabled={busy === "flag" || flag.trim().length < 32} data-testid="htb-flag-submit">
+              {busy === "flag" ? <Loader2 size={11} className="animate-spin" /> : <Flag size={11} />} сдать</Button>
+          </form>
+          {flagMsg && <div className={cx("mt-1 text-[11px] leading-snug", flagMsg.ok ? "text-accent" : "text-err")} data-testid="htb-flag-msg">{flagMsg.text}</div>}
         </div>
       ) : (
         <div className="mt-2.5">

@@ -157,6 +157,27 @@ export async function spawnMachine(id: number): Promise<void> {
   await call(token, "POST", "/v4/vm/spawn", { machine_id: id });
   cache = null;
 }
+// Связь задачи с машиной HTB — маркер импорта первой строкой брифа («HTB machine #123»).
+export const machineIdFromBrief = (brief: string): number | null => {
+  const m = /^HTB machine #(\d+)/.exec(brief ?? "");
+  return m ? Number(m[1]) : null;
+};
+
+export type FlagSubmitResult = { ok: boolean; message: string; machineId: number };
+export async function submitFlag(machineId: number, flag: string): Promise<FlagSubmitResult> {
+  const { token } = need();
+  const f = String(flag ?? "").trim().toLowerCase();
+  if (!/^[0-9a-f]{32}$/.test(f)) throw new Error("флаг HTB — 32 hex-символа из user.txt/root.txt");
+  try {
+    const r = await call(token, "POST", "/v4/machine/own", { id: machineId, flag: f });
+    cache = null;
+    return { ok: true, message: String(r?.message ?? "флаг принят"), machineId };
+  } catch (e) {
+    // call() оборачивает статус в текст — наружу только суть ответа HTB («Incorrect flag» и т.п.)
+    return { ok: false, message: (e as Error).message.replace(/^HTB API POST \/v4\/machine\/own → \d+: /, ""), machineId };
+  }
+}
+
 export async function stopActiveMachine(): Promise<void> {
   const { token } = need();
   const act = (await call(token, "GET", "/v4/machine/active"))?.info;

@@ -227,6 +227,23 @@ app.post("/api/htb/spawn", wrap(async (req) => {
   return htbStatusSynced(true);
 }));
 app.post("/api/htb/stop", wrap(async () => { await htb.stopActiveMachine(); return htbStatusSynced(true); }));
+app.post("/api/htb/submit-flag", wrap(async (req) => {
+  const flag = String(req.body?.flag ?? "").trim();
+  let machineId = Number(req.body?.machineId);
+  if (!Number.isInteger(machineId) || machineId <= 0) {
+    const taskId = String(req.body?.taskId ?? "");
+    const task = taskId ? db.prepare("select brief from tasks where id=?").get(taskId) as { brief: string } | undefined : undefined;
+    machineId = (task && htb.machineIdFromBrief(task.brief)) || 0;
+  }
+  if (!machineId) {
+    const st = await htb.htbStatus();
+    machineId = st.activeMachine?.id ?? 0;
+  }
+  if (!machineId) throw new HttpError(400, "не знаю, для какой машины флаг: укажи machineId, задачу из импорта HTB или запусти машину");
+  const res = await htb.submitFlag(machineId, flag);
+  const status = res.ok ? await htbStatusSynced(true).catch(() => undefined) : undefined;
+  return { ...res, ...(status ? { status } : {}) };
+}));
 app.post("/api/htb/import", wrap(async (req) => {
   const bodyId = Number(req.body?.machineId);
   let m: htb.HtbMachine | null = null;

@@ -148,6 +148,7 @@ export const api = {
   htbMachines: (q: string) => j<HtbMachine[]>(`/api/htb/machines?q=${encodeURIComponent(q)}`),
   htbSpawn: (machineId: number) => j<HtbStatus>("/api/htb/spawn", json("POST", { machineId })),
   htbStop: () => j<HtbStatus>("/api/htb/stop", json("POST")),
+  htbSubmitFlag: (flag: string, machineId?: number, taskId?: string) => j<{ ok: boolean; message: string; machineId: number; status?: HtbStatus }>("/api/htb/submit-flag", json("POST", { flag, machineId, taskId })),
   htbImport: (machineId?: number) => j<{ task: Task; chat: Chat; existed: boolean }>("/api/htb/import", json("POST", machineId ? { machineId } : {})),
   tasks: () => j<Task[]>("/api/tasks"),
   createTask: (t: { title: string; course: string; brief: string; target: string; hostname: string }) => j<{ task: Task; chat: Chat }>("/api/tasks", json("POST", t)),

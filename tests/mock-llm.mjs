@@ -28,6 +28,7 @@ const HTB_MACHINES = [
 ];
 const htbDefaultActive = () => ({ id: 777, name: "MockBox", ip: "10.129.245.100", isSpawning: false, type: "Free", expires_at: "2030-01-01 00:00:00", lab_server: "mock_lab", vpn_server_id: 1, tier_id: null });
 let htbActive = htbDefaultActive();
+const htbOwnedFlags = new Set();
 
 const plugins = [];
 {
@@ -345,7 +346,7 @@ code line 2 &lt;tag&gt;</pre>
 <ul><li>пункт один</li><li>пункт два</li></ul>
 <p>Ссылка: <a href="https://example.org/more">подробнее</a>.</p></body></html>`);
   }
-  if (url.pathname === "/__reset") { requests.length = 0; htbActive = htbDefaultActive(); res.writeHead(200); return res.end("ok"); }
+  if (url.pathname === "/__reset") { requests.length = 0; htbActive = htbDefaultActive(); htbOwnedFlags.clear(); for (const m of HTB_MACHINES) m.authUserInUserOwns = m.id === 778; res.writeHead(200); return res.end("ok"); }
   let raw = "";
   for await (const c of req) raw += c;
   let body = {};
@@ -376,6 +377,16 @@ code line 2 &lt;tag&gt;</pre>
       return j(200, { message: "Machine spawned", success: true });
     }
     if (p === "/api/v4/vm/terminate" && req.method === "POST") { htbActive = null; return j(200, { message: "Machine terminated", success: true }); }
+    if (p === "/api/v4/machine/own" && req.method === "POST") {
+      const m = HTB_MACHINES.find((x) => x.id === Number(body.id));
+      if (!m) return j(404, { message: "Machine not found" });
+      if (body.flag !== "0123456789abcdef0123456789abcdef") return j(400, { message: "Incorrect flag!" });
+      const key = `${body.id}:${body.flag}`;
+      if (htbOwnedFlags.has(key)) return j(400, { message: "You already owned this machine" });
+      htbOwnedFlags.add(key);
+      m.authUserInUserOwns = true;
+      return j(200, { message: "Machine owned!", success: true });
+    }
     return j(404, { message: "mock: unknown HTB path" });
   }
   if (url.pathname === "/v1/chat/completions") return handleChat(body, res, req.headers.authorization ?? null).catch((e) => { try { res.end(); } catch { /* */ } console.error(e); });
