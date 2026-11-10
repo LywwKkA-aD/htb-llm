@@ -1,0 +1,25 @@
+name: CI
+
+# Лёгкий гейт на каждый пуш: типы + сборка веба + синтаксис мок-сервера тестов.
+# Полный e2e (Playwright + Docker + Kali-образ) сюда не входит осознанно — он гоняется локально
+# перед релизом (pnpm test:e2e); в CI он слишком тяжёл для бесплатного раннера.
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run typecheck
+      - run: pnpm run build
+      - run: node --check tests/mock-llm.mjs
