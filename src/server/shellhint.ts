@@ -138,3 +138,54 @@ export function cronChainHint(taskId: string, scope: string, text: string): stri
     return "";
   }
 }
+
+// Выжимка энумерации: linpeas и ручной enum-вывод модель простынёй не дочитывает (красные строки
+// тонут в сотнях обычных; в capture-pane цветов и нет). Сервер выдёргивает строки-кандидаты по
+// категориям векторов и показывает только новые для этого scope — без повторов на каждом поллинге.
+const DIGEST_RULES: { cat: string; re: RegExp }[] = [
+  { cat: "sudo", re: /NOPASSWD|^\s*\(\w[\w :]*\)\s+\// },
+  { cat: "suid", re: /^-rws|\bsuid\b.*\//i },
+  { cat: "caps", re: /cap_\w+(\+|=)/ },
+  { cat: "cron", re: /^((?:[\d*][\d*/,-]*\s+){4}[\d*][\d*/,-]*|@(?:reboot|hourly|daily|weekly|monthly|yearly))\s+(?:\w+\s+)?\S*\// },
+  { cat: "timer", re: /\b[\w@.-]+\.timer\s+[\w@.-]+\.service\b/ },
+  { cat: "incron", re: /^\/?\S+\s+IN_\w+/ },
+  { cat: "writable", re: /writable.*\/|\/.*writable/i },
+  { cat: "groups", re: /groups=[^\n]*\((?:docker|disk|lxd|adm)\)/ },
+  { cat: "nfs", re: /no_root_squash/ },
+  { cat: "docker", re: /docker\.sock/ },
+  { cat: "cve", re: /Vulnerable to CVE-|CVE-\d{4}-\d{4,7}.*(?:vulnerab|exploit)/i },
+  { cat: "win", re: /SeImpersonatePrivilege|AlwaysInstallElevated/ },
+];
+export function enumDigest(taskId: string, scope: string, text: string): string {
+  if (process.env.WH_SHELL_HINTS === "off" || !text) return "";
+  try {
+    const plain = stripAnsi(text);
+    const lines = plain.split("\n");
+    const hits: string[] = [];
+    const cats = new Set<string>();
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line || line.length > 220) continue;
+      for (const { cat, re } of DIGEST_RULES) if (re.test(line)) { hits.push(line.slice(0, 180)); cats.add(cat); break; }
+      if (hits.length > 200) break;
+    }
+    const isLinpeas = /linpeas|Linux Privilege Escalation Awesome|LEGEND:/i.test(plain);
+    if (!hits.length || (!isLinpeas && cats.size < 2)) return "";
+    const key = `${taskId}:${scope}:digest`;
+    let shown = seen.get(key);
+    if (!shown) {
+      if (seen.size > 100) seen.delete(seen.keys().next().value as string);
+      shown = new Set();
+      seen.set(key, shown);
+    }
+    const freshLines = [...new Set(hits)].filter((l) => !shown!.has(l));
+    if (!freshLines.length) return "";
+    for (const l of freshLines) shown.add(l);
+    while (shown.size > 300) shown.delete(shown.values().next().value as string);
+    const shownLines = freshLines.slice(0, 25);
+    const more = freshLines.length > shownLines.length ? `\n…и ещё ${freshLines.length - shownLines.length} строк-кандидатов в полном выводе` : "";
+    return `[серверная выжимка энумерации — строки-кандидаты на вектор, отработай каждую или закрой выводом, прежде чем искать дальше:\n${shownLines.join("\n")}${more}]`;
+  } catch {
+    return "";
+  }
+}

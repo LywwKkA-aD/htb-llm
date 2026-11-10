@@ -43,4 +43,33 @@ test.describe("привеск-подсказки", () => {
       await request.post(`/api/tasks/${ids.task.id}/jobs/${job.id}/stop`).catch(() => {});
     }
   });
+
+  test("выжимка энумерации: строки-кандидаты из linpeas-подобного вывода, без повтора на втором опросе", async ({ page, request }) => {
+    test.setTimeout(180_000);
+    const job = await (await request.post(`/api/tasks/${ids.task.id}/jobs`, {
+      data: {
+        name: "linpeas-sim",
+        command: "bash -lc \"echo 'LEGEND: digest-test'; echo 'regular boring line about files'; echo '(root) NOPASSWD: /opt/wh-sudotool'; echo '-rwsr-xr-x 1 root root 9 /usr/bin/wh-suidbin'; echo '/usr/bin/python3 cap_setuid=ep'; echo '[+] Writable Dir: /opt/wh-wrdir'; sleep 30\"",
+      },
+    })).json();
+    try {
+      const outApi = async () => (await (await request.get(`/api/tasks/${ids.task.id}/jobs/${job.id}/output?lines=40`)).json()).output as string;
+      await expect.poll(outApi, { timeout: 20_000 }).toContain("wh-sudotool");
+      const chat = await (await request.post(`/api/tasks/${ids.task.id}/chats`)).json();
+      await openTask(page, { task: ids.task, chat });
+      await send(page, tt([call("job_output", { id: job.id })]));
+      await waitIdle(page);
+      const first = await toolOuts(request, chat.id);
+      expect(first).toContain("выжимка энумерации");
+      expect(first).toContain("/opt/wh-sudotool");
+      expect(first).toContain("wh-suidbin");
+      expect(first).toContain("cap_setuid=ep");
+      await send(page, tt([call("job_output", { id: job.id })]));
+      await waitIdle(page);
+      const all = await toolOuts(request, chat.id);
+      expect(all.split("выжимка энумерации").length - 1).toBe(1);
+    } finally {
+      await request.post(`/api/tasks/${ids.task.id}/jobs/${job.id}/stop`).catch(() => {});
+    }
+  });
 });

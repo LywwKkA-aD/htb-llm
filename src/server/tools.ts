@@ -16,7 +16,7 @@ import { exploitHints } from "./exploits.ts";
 import * as nmap from "./nmap.ts";
 import * as ffuf from "./ffuf.ts";
 import * as sqlmap from "./sqlmap.ts";
-import { cronChainHint, passwordPromptHint, shellCatchHint } from "./shellhint.ts";
+import { cronChainHint, enumDigest, passwordPromptHint, shellCatchHint } from "./shellhint.ts";
 import { subnetCalc } from "./subnet.ts";
 import { looksLikeWriteup, SPOILER_BLOCK_TEXT } from "./spoilers.ts";
 import { injectionWarning } from "./injection.ts";
@@ -486,6 +486,7 @@ export async function runTool(name: string, rawArgs: string, ctx: ToolCtx): Prom
         const notes = [
           inj ?? "",
           cronHint,
+          enumDigest(ctx.taskId, "shell", `${o.head}\n${o.tail}`),
           inter ? `[подсказка: команда похожа на интерактивную/долгоживущую (${inter}). В shell она умрёт по таймауту вместе с процессом — такие вещи запускай через job_start: сессия переживёт ход, ввод — job_input, вывод — job_output]` : "",
           // модель редко сама поднимает timeout_sec: сканы регулярно умирали на дефолтных 90 с (логи чатов)
           r.timedOut && !inter ? "[подсказка: заведомо долгие команды запускай с timeout_sec до 900, а листенеры и интерактивные сессии — через job_start]" : "",
@@ -729,9 +730,11 @@ export async function runTool(name: string, rawArgs: string, ctx: ToolCtx): Prom
         const pwHint = r.job.running ? passwordPromptHint(ctx.taskId, r.job, r.output) : "";
         // Задача расписания в свежем выводе: напомнить про цепочку исполнения до экзотики.
         const cronHint = r.job.running && fresh ? cronChainHint(ctx.taskId, `job:${r.job.id}`, fresh) : "";
+        // Выжимка энумерации по полному экрану: кандидаты на векторы, только новые строки.
+        const digest = r.job.running ? enumDigest(ctx.taskId, `job:${r.job.id}`, r.output) : "";
         // Диагностика листенера: мёртвое соединение/очередь backlog — иначе модель поллит пустой экран.
         const diag = r.job.running ? await sandbox.jobListenerDiag(ctx.taskId, r.job.id).catch(() => "") : "";
-        return [body, hint, pwHint, cronHint, diag].filter(Boolean).join("\n");
+        return [body, hint, pwHint, cronHint, digest, diag].filter(Boolean).join("\n");
       }
       case "job_input": {
         const enter = a.enter !== false && String(a.enter ?? "").toLowerCase() !== "false";
