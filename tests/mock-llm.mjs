@@ -377,11 +377,13 @@ code line 2 &lt;tag&gt;</pre>
       return j(200, { message: "Machine spawned", success: true });
     }
     if (p === "/api/v4/vm/terminate" && req.method === "POST") { htbActive = null; return j(200, { message: "Machine terminated", success: true }); }
-    if (p === "/api/v4/machine/own" && req.method === "POST") {
-      const m = HTB_MACHINES.find((x) => x.id === Number(body.id));
+    if (p === "/api/v5/machine/own" && req.method === "POST") {
+      // как настоящий HTB: v4-маршрута нет (404 ниже), в v5 параметры machine_id+flag обязательны
+      if (!body.flag) return j(422, { message: "The flag field is required.", errors: { flag: ["The flag field is required."] } });
+      const m = HTB_MACHINES.find((x) => x.id === Number(body.machine_id));
       if (!m) return j(404, { message: "Machine not found" });
-      if (body.flag !== "0123456789abcdef0123456789abcdef") return j(400, { message: "Incorrect flag!" });
-      const key = `${body.id}:${body.flag}`;
+      if (body.flag !== "0123456789abcdef0123456789abcdef") return j(400, { message: "Incorrect Flag." });
+      const key = `${body.machine_id}:${body.flag}`;
       if (htbOwnedFlags.has(key)) return j(400, { message: "You already owned this machine" });
       htbOwnedFlags.add(key);
       m.authUserInUserOwns = true;

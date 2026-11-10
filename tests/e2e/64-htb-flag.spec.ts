@@ -19,7 +19,7 @@ test.describe("сдача флага HTB", () => {
     const submit = (data: any) => request.post("/api/htb/submit-flag", { data });
     const bad = await (await submit({ flag: "00000000000000000000000000000000" })).json();
     expect(bad.ok).toBeFalsy();
-    expect(bad.message).toContain("Incorrect flag");
+    expect(bad.message).toContain("Incorrect Flag.");
     const good = await (await submit({ flag: GOOD })).json();
     expect(good.ok).toBeTruthy();
     expect(good.machineId).toBe(777);

@@ -169,12 +169,14 @@ export async function submitFlag(machineId: number, flag: string): Promise<FlagS
   const f = String(flag ?? "").trim().toLowerCase();
   if (!/^[0-9a-f]{32}$/.test(f)) throw new Error("флаг HTB — 32 hex-символа из user.txt/root.txt");
   try {
-    const r = await call(token, "POST", "/v4/machine/own", { id: machineId, flag: f });
+    // own живёт только в v5 и хочет machine_id (v4-маршрут HTB убрал: «The route api/v4/machine/own
+    // could not be found» у пользователя; форма сверена по htb-mcp и живой пробой — Incorrect Flag.)
+    const r = await call(token, "POST", "/v5/machine/own", { machine_id: machineId, flag: f });
     cache = null;
     return { ok: true, message: String(r?.message ?? "флаг принят"), machineId };
   } catch (e) {
-    // call() оборачивает статус в текст — наружу только суть ответа HTB («Incorrect flag» и т.п.)
-    return { ok: false, message: (e as Error).message.replace(/^HTB API POST \/v4\/machine\/own → \d+: /, ""), machineId };
+    // call() оборачивает статус в текст — наружу только суть ответа HTB («Incorrect Flag.» и т.п.)
+    return { ok: false, message: (e as Error).message.replace(/^HTB API POST \/v5\/machine\/own → \d+: /, ""), machineId };
   }
 }
 
