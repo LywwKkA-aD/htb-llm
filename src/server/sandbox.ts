@@ -349,18 +349,84 @@ export function ensureWorkspace(taskId: string) {
   return work;
 }
 
-const hostsSynced = new Map<string, string>();
-async function syncHosts(taskId: string, c: Docker.Container, containerId: string) {
+const hostsSynced = new Map<string, { key: string; at: number }>();
+// Свои строки /etc/hosts (vhost'ы, найденные имена) Docker стирает при каждом старте/пересоздании
+// контейнера — файл у него управляемый и не лежит в /work. Поэтому пользовательские строки зеркалим
+// в /work/.whitehat/hosts.extra и восстанавливаем при синхронизации; наш блок цели — отдельно.
+const hostsExtraFile = (taskId: string) => path.join(paths.taskWork(taskId), ".whitehat", "hosts.extra");
+const HOSTS_LINE_RE = /^\d+\.\d+\.\d+\.\d+\s+\S+/;
+export function readHostsExtra(taskId: string): string[] {
+  try {
+    return fs.readFileSync(hostsExtraFile(taskId), "utf8").split("\n").map((s) => s.trim())
+      .filter((l) => HOSTS_LINE_RE.test(l));
+  } catch { return []; }
+}
+function writeHostsExtra(taskId: string, lines: string[]) {
+  const f = hostsExtraFile(taskId);
+  const next = lines.length ? lines.join("\n") + "\n" : "";
+  let cur = "";
+  try { cur = fs.readFileSync(f, "utf8"); } catch { /* нет файла — создадим */ }
+  if (cur === next) return;
+  writeNoFollow(f, next, 0o644);
+}
+async function syncHosts(taskId: string, c: Docker.Container, containerId: string, remapIp?: readonly [string, string]) {
   const m = taskMeta(taskId);
-  if (!isIpv4(m.target)) return;
   const hosts = [...new Set([m.hostname, "machine.htb"].filter(isHostname))];
-  if (!hosts.length) return;
-  const key = `${containerId}:${m.target}:${hosts.join(",")}`;
-  if (hostsSynced.get(taskId) === key) return;
-  const script = `python3 - <<'PY'\nimport re\np="/etc/hosts"\ns=open(p).read()\ns=re.sub(r"# whitehat-task-begin\\n.*?# whitehat-task-end\\n?", "", s, flags=re.S)\nblock="# whitehat-task-begin\\n${m.target} ${hosts.join(" ")}\\n# whitehat-task-end\\n"\nopen(p,"w").write(s.rstrip()+"\\n"+block)\nprint("whitehat-hosts-ok")\nPY`;
+  const saved = readHostsExtra(taskId);
+  if (!isIpv4(m.target) && !saved.length && !hosts.length) return;
+  const startedAt = await c.inspect().then((i) => String((i.State as any)?.StartedAt ?? "")).catch(() => "");
+  const key = `${containerId}:${startedAt}:${m.target}:${hosts.join(",")}`;
+  const prev = hostsSynced.get(taskId);
+  // троттлинг скрейпа: ключ тот же (контейнер не рестартовал, цель та же) — не чаще раза в 5 с
+  if (prev && prev.key === key && Date.now() - prev.at < 5_000) return;
+  const block = isIpv4(m.target) && hosts.length
+    ? ["# whitehat-task-begin", `${m.target} ${hosts.join(" ")}`, "# whitehat-task-end"]
+    : [] as string[];
+  const payload = Buffer.from(JSON.stringify({ saved, ours: hosts, block, remap: remapIp ? { [remapIp[0]]: remapIp[1] } : {} })).toString("base64");
+  const py = [
+    "import re, json, base64, socket",
+    `cfg=json.loads(base64.b64decode("${payload}"))`,
+    'p="/etc/hosts"',
+    "s=open(p).read()",
+    's=re.sub(r"# whitehat-task-begin\\n.*?# whitehat-task-end\\n?", "", s, flags=re.S)',
+    'docker_names={"localhost","ip6-localhost","ip6-loopback","ip6-localnet","ip6-mcastprefix","ip6-allnodes","ip6-allrouters","ip6-allhosts",socket.gethostname()}',
+    "def is_system(parts):",
+    "    names=parts[1:]",
+    '    return parts[0].startswith("127.") or parts[0]=="::1" or not names or all(n in docker_names or n.endswith(".docker.internal") or n=="host.containers.internal" for n in names)',
+    "system=[]; byname={}; order=[]",
+    "def add_custom(line):",
+    "    parts=line.split()",
+    "    if not re.match(r'^\\d+\\.\\d+\\.\\d+\\.\\d+$', parts[0]): return",
+    "    names=[n for n in parts[1:] if n not in cfg['ours']]",
+    "    ip=cfg.get('remap', {}).get(parts[0], parts[0])",
+    "    for n in names:",
+    "        if n not in byname: order.append(n)",
+    "        byname[n]=ip",
+    "for line in cfg['saved']: add_custom(line)",
+    "for raw in s.splitlines():",
+    "    t=raw.strip()",
+    "    if not t or t.startswith('#'): continue",
+    "    parts=t.split()",
+    "    if is_system(parts): system.append(t)",
+    "    else: add_custom(t)",
+    "byip={}",
+    "for n in order: byip.setdefault(byname[n], []).append(n)",
+    'custom=[ip+" "+" ".join(ns) for ip, ns in byip.items()]',
+    "out=system+custom+cfg['block']",
+    "new='\\n'.join(out)+'\\n'",
+    "if new!=open(p).read(): open(p,'w').write(new)",
+    'print("WHHOSTS_BEGIN")',
+    "for l in custom: print(l)",
+    'print("WHHOSTS_END")',
+    'print("whitehat-hosts-ok")',
+  ].join("\n");
+  const script = `python3 - <<'PY'\n${py}\nPY`;
   try {
     const out = await execRaw(c, script, 8000);
-    if (out.includes("whitehat-hosts-ok")) hostsSynced.set(taskId, key);
+    if (!out.includes("whitehat-hosts-ok")) return;
+    hostsSynced.set(taskId, { key, at: Date.now() });
+    const mm = /WHHOSTS_BEGIN\n([\s\S]*?)\nWHHOSTS_END/.exec(out);
+    if (mm) writeHostsExtra(taskId, mm[1].split("\n").map((s2) => s2.trim()).filter(Boolean));
   } catch { /* hosts — удобство; TARGET по IP работает и без него */ }
 }
 
@@ -1934,7 +2000,9 @@ async function syncBrowserHosts(taskId: string, sidecar: Docker.Container) {
   const hosts = [...new Set([m.hostname, "machine.htb"].filter(isHostname))];
   if (!hosts.length) return;
   const names = hosts.map((h) => `'${h}'`).join(", ");
-  const script = `python3 - <<'PY'\nimport re\np="/etc/hosts"\ns=open(p).read()\ns=re.sub(r"# whitehat-task-begin\\n.*?# whitehat-task-end\\n?", "", s, flags=re.S)\nns=[${names}]\nkeep=[l for l in s.splitlines() if l.startswith(("127.", "::1")) or not any(h in l.split()[1:] for h in ns)]\nblock="# whitehat-task-begin\\n${m.target} ${hosts.join(" ")}\\n# whitehat-task-end\\n"\nopen(p,"w").write("\\n".join(keep).rstrip()+"\\n"+block)\nprint("whitehat-hosts-ok")\nPY`;
+  // свои vhost-строки задачи браузеру тоже нужны — блок несёт их следом за строкой цели
+  const extra = readHostsExtra(taskId).map((l) => `${l}\\n`).join("");
+  const script = `python3 - <<'PY'\nimport re\np="/etc/hosts"\ns=open(p).read()\ns=re.sub(r"# whitehat-task-begin\\n.*?# whitehat-task-end\\n?", "", s, flags=re.S)\nns=[${names}]\nkeep=[l for l in s.splitlines() if l.startswith(("127.", "::1")) or not any(h in l.split()[1:] for h in ns)]\nblock="# whitehat-task-begin\\n${m.target} ${hosts.join(" ")}\\n${extra}# whitehat-task-end\\n"\nopen(p,"w").write("\\n".join(keep).rstrip()+"\\n"+block)\nprint("whitehat-hosts-ok")\nPY`;
   await execRaw(sidecar, script, 10_000);
 }
 
@@ -1947,6 +2015,11 @@ export async function applyTargetChange(taskId: string, oldTarget: string, newTa
   if (!newTarget || oldTarget === newTarget) return;
   if (oldTarget) {
     try { db.prepare("update profile_items set host=?, updated_at=? where task_id=? and host=?").run(newTarget, Date.now(), taskId, oldTarget); } catch { /* профиль — не критичен */ }
+    // свои vhost-строки на старый IP цели переезжают на новый вместе с целью
+    try {
+      const ex = readHostsExtra(taskId);
+      if (ex.length) writeHostsExtra(taskId, ex.map((l) => (l.split(/\s+/)[0] === oldTarget ? l.replace(/^\S+/, newTarget) : l)));
+    } catch { /* hosts — удобство */ }
   }
   try { ensureWorkspace(taskId); } catch { /* TASK.md обновится на следующем ensure */ }
   agentNote(taskId, oldTarget
@@ -1957,7 +2030,7 @@ export async function applyTargetChange(taskId: string, oldTarget: string, newTa
     const c = docker.getContainer(cname(taskId));
     const info = await c.inspect();
     hostsSynced.delete(taskId);
-    await syncHosts(taskId, c, info.Id);
+    await syncHosts(taskId, c, info.Id, oldTarget ? [oldTarget, newTarget] : undefined);
   } catch { /* hosts подтянется на следующем ensure */ }
   try {
     const b = docker.getContainer(browserName(taskId));
