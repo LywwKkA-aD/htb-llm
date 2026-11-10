@@ -107,3 +107,34 @@ export function passwordPromptHint(taskId: string, job: { id: string; name: stri
     return "";
   }
 }
+
+// Детект задачи расписания в выводе (Connected: модель видела cron, но цепочку исполнения не
+// проследила и ушла в экзотику): строка crontab с путём скрипта, systemd-таймер или incron.
+// Подсказка один раз на скрипт/строку в рамках scope (job или shell задачи), дедуп — общий seen.
+const CRON_LINE_RE = /^[ \t]*((?:[\d*][\d*/,-]*[ \t]+){4}[\d*][\d*/,-]*|@(?:reboot|hourly|daily|weekly|monthly|yearly))[ \t]+(?:\w+[ \t]+)?(\S*\/\S+.*)$/m;
+const TIMER_LINE_RE = /^.*\b([\w@.-]+\.timer)\s+([\w@.-]+\.service)\b.*$/m;
+const INCRON_LINE_RE = /^[ \t]*(\/\S+)[ \t]+IN_\w+(?:,IN_\w+)*[ \t]+(\S*\/\S+.*)$/m;
+export function cronChainHint(taskId: string, scope: string, text: string): string {
+  if (process.env.WH_SHELL_HINTS === "off" || !text) return "";
+  try {
+    const plain = stripAnsi(text);
+    const m = CRON_LINE_RE.exec(plain) ?? INCRON_LINE_RE.exec(plain) ?? TIMER_LINE_RE.exec(plain);
+    if (!m) return "";
+    const line = evidenceLine(plain, m.index);
+    const scriptTok = (line.match(/\/[\w./-]+/) ?? [""])[0];
+    const sig = `cron:${scriptTok || line}`;
+    const key = `${taskId}:${scope}:cron`;
+    let set = seen.get(key);
+    if (!set) {
+      if (seen.size > 100) seen.delete(seen.keys().next().value as string);
+      set = new Set();
+      seen.set(key, set);
+    }
+    if (set.has(sig)) return "";
+    set.add(sig);
+    if (set.size > 10) set.delete(set.values().next().value as string);
+    return `[в выводе задача расписания (${line}). Это классический путь повышения через цепочку исполнения: прочитай скрипт целиком, выпиши всё, что он подключает (source/include/конфиги) и вызывает по PATH, и по каждому звену и его родительским папкам выполни namei -l <путь> — записываемое звено (файл ИЛИ папка над ним) даёт исполнение от владельца задачи. Вектор не закрывай по одному владельцу скрипта; реальные запуски сверь pspy.]`;
+  } catch {
+    return "";
+  }
+}
