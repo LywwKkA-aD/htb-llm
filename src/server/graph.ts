@@ -67,7 +67,7 @@ type ToolCallLike = { id?: string; name: string; args?: any };
 const REFERENCE_TOOLS = new Set(["search_docs", "search_memory", "web_search", "web_fetch", "read_rfc", "subnet_calc", "user_history", "job_list", "job_output", "plan_update", "profile_update"]);
 // «Рабочие» инструменты для советника при застревании: шире, чем действия guided-бюджета, —
 // read-only shell и поллинг job_output тоже могут крутиться раундами без новых фактов.
-const WORK_TOOLS = new Set(["shell", "http_request", "tcp_probe", "nmap_scan", "ffuf_scan", "sqlmap_scan", "privesc_enum", "job_start", "job_input", "job_output"]);
+const WORK_TOOLS = new Set(["shell", "http_request", "tcp_probe", "nmap_scan", "ffuf_scan", "sqlmap_scan", "privesc_enum", "cred_check", "job_start", "job_input", "job_output"]);
 // Специализированные CLI, где угаданный синтаксис особенно вреден. Базовые Unix-утилиты сюда не входят:
 // их карточки есть в базе, но жёсткий гейт на каждый ls/cat превратил бы инструмент в бюрократию.
 const SPECIALIZED_COMMANDS = new Set([

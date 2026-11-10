@@ -17,6 +17,7 @@ import * as nmap from "./nmap.ts";
 import * as ffuf from "./ffuf.ts";
 import * as sqlmap from "./sqlmap.ts";
 import * as privesc from "./privesc.ts";
+import * as credcheck from "./credcheck.ts";
 import { cronChainHint, enumDigest, passwordPromptHint, shellCatchHint } from "./shellhint.ts";
 import { subnetCalc } from "./subnet.ts";
 import { looksLikeWriteup, SPOILER_BLOCK_TEXT } from "./spoilers.ts";
@@ -236,6 +237,25 @@ export const TOOLS = [
           timeout_sec: { type: "integer", description: "сколько ждать бандл (по умолчанию 90, максимум 240)" },
         },
         required: ["job"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "cred_check",
+      description:
+        "Проверка одной пары кред (логин + пароль или NTLM-хэш) по сервисам цели через netexec одним вызовом — вместо ручных циклов и «матриц пароль × вход». По умолчанию сервисы берутся из профиля цели по открытым портам (445→smb, 22→ssh, 5985→winrm, 21→ftp, 1433→mssql, 389→ldap, 3389→rdp). Работающие доступы сам записывает кредами в профиль, отказы — фактом «не подходит: …», чтобы пара не проверялась повторно в следующих чатах. Аккуратно с политикой блокировок AD: одна пара за вызов, без спрея по словарям.",
+      parameters: {
+        type: "object",
+        properties: {
+          username: { type: "string", description: "логин; для домена — DOMAIN\\user или user@domain" },
+          secret: { type: "string", description: "пароль или NTLM-хэш (с secret_type=hash)" },
+          secret_type: { type: "string", enum: ["password", "hash"], description: "password (по умолчанию) или hash — pass-the-hash для smb/winrm/mssql/ldap/rdp" },
+          host: { type: "string", description: "IP или имя цели; пусто — $TARGET задачи" },
+          services: { type: "array", items: { type: "string" }, description: "протоколы netexec: smb, winrm, ssh, ftp, mssql, ldap, rdp, wmi, vnc; пусто — из профиля по портам" },
+        },
+        required: ["username", "secret"],
       },
     },
   },
@@ -685,6 +705,21 @@ export async function runTool(name: string, rawArgs: string, ctx: ToolCtx): Prom
         if (!r.ok) return `ошибка: ${r.error}`;
         const inj = injectionWarning(r.text);
         return inj ? `${r.text}\n${inj}` : r.text;
+      }
+      case "cred_check": {
+        const opts: credcheck.CredCheckOpts = {
+          host: a.host ? String(a.host).trim() : undefined,
+          username: String(a.username ?? ""),
+          secret: String(a.secret ?? ""),
+          secretType: a.secret_type ? String(a.secret_type) : undefined,
+          services: Array.isArray(a.services) ? a.services.map((s: unknown) => String(s)) : undefined,
+        };
+        const bad = credcheck.validateCredOpts(opts);
+        if (bad) return `ошибка: ${bad}`;
+        const r = await credcheck.runCredCheck(ctx.taskId, opts, ctx.signal);
+        const out = credcheck.formatCredCheck(r, opts.username);
+        const inj = r.ok ? injectionWarning(out) : null;
+        return inj ? `${out}\n${inj}` : out;
       }
       case "plan_update": {
         const action = String(a.action ?? "");
