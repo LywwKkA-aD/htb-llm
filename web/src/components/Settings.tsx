@@ -417,6 +417,10 @@ export function SettingsDialog({ open, onClose, onSaved }: { open: boolean; onCl
                 <Input value={String(agents.maxRounds)} inputMode="numeric" className="max-w-24" data-testid="set-agents-rounds"
                   onChange={(e) => setAgents({ ...agents, maxRounds: Number(e.target.value) })} />
               </Field>
+              <Field label="Раундов действий на этап (управляемый режим, 3–24)">
+                <Input value={String(agents.guidedRounds)} inputMode="numeric" className="max-w-24" data-testid="set-guided-rounds"
+                  onChange={(e) => setAgents({ ...agents, guidedRounds: Number(e.target.value) })} />
+              </Field>
             </div>
             <p className="mt-2 text-[11.5px] leading-snug text-dim">
               {saved.llm.active === "local"

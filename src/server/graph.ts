@@ -153,7 +153,7 @@ function shellActionKeys(command: string): string[] {
 }
 const READONLY_SHELL_COMMANDS = new Set([
   "test", "[", "which", "type", "ls", "cat", "head", "tail", "wc", "grep", "egrep", "fgrep", "stat", "file",
-  "du", "df", "pwd", "echo", "printf", "true", "false", "id", "whoami", "hostname", "uname", "date", "printenv",
+  "du", "df", "pwd", "echo", "printf", "true", "false", "id", "whoami", "hostname", "uname", "date", "printenv", "sleep",
 ]);
 // Локальная проверка/чтение не должна съедать бюджет этапа: в живых чатах ход обрывался на `test -f словаря`
 // прямо перед самим ffuf и на `cat` файла вывода. Запись в файл и подстановки команд сюда не входят.
@@ -435,13 +435,34 @@ async function recallNode(state: S, config: LangGraphRunnableConfig) {
   return { ...reset, messages: [upd] };
 }
 
+// На границе этапа последний job_input часто остаётся без прочитанного вывода («вывод забрать не успел»):
+// сервер сам доснимает свежий экран таких job в финальное сообщение лимита — без лишнего раунда модели.
+async function collectFreshJobOutput(state: S, taskId: string, signal: AbortSignal): Promise<string> {
+  const ai = [...state.messages].reverse().find((m) => isAIMessage(m) && ((m as AIMessage).tool_calls?.length ?? 0) > 0) as AIMessage | undefined;
+  const ids = [...new Set(((ai?.tool_calls ?? []) as ToolCallLike[]).filter((c) => c.name === "job_input").map((c) => String(c.args?.id ?? "")).filter(Boolean))].slice(0, 2);
+  if (!ids.length || signal.aborted) return "";
+  await new Promise((r) => setTimeout(r, 2500));
+  if (signal.aborted) return "";
+  const jobs = await sandbox.listJobs(taskId).catch(() => []);
+  const parts: string[] = [];
+  for (const id of ids) {
+    const job = jobs.find((j) => j.id === id || j.name === id);
+    if (!job?.running) continue;
+    const o = await sandbox.jobOutput(taskId, job.id, 60).catch(() => null);
+    const tail = (o?.output ?? "").replace(/\s+$/, "").slice(-1800);
+    if (tail) parts.push(`Свежий вывод job «${job.name}» после твоего последнего ввода (доснят сервером на границе этапа):\n${tail}`);
+  }
+  return parts.join("\n\n");
+}
+
 async function agentNode(state: S, config: LangGraphRunnableConfig) {
   const run = runOf(config);
   const task = getTask(run.taskId);
   const chat = getChat(run.chatId)!;
   const subOn = subagentsAvailable();
   const sys = systemPrompt(task, (state.memSnap ?? memory.snapshot(run.taskId)).text, chat.summary, run.mode, subOn);
-  const guidedLimitHit = run.mode === "guided" && state.actionRounds >= cfg.guidedToolRounds;
+  const guidedRounds = getSettings().agents.guidedRounds || cfg.guidedToolRounds;
+  const guidedLimitHit = run.mode === "guided" && state.actionRounds >= guidedRounds;
   const limitHit = guidedLimitHit || state.toolRounds >= cfg.maxToolRounds;
   const loopHit = state.repeats >= cfg.maxRepeats;
   // сворачивание работает только между ходами; внутри длинной цепочки инструментов контекст может дорасти до окна
@@ -452,18 +473,25 @@ async function agentNode(state: S, config: LangGraphRunnableConfig) {
     // инструменты сняты — прямо говорим модели, иначе она пишет <tool_call> текстом или снова «вызывает» то же самое
     const reason = loopHit ? "Ты несколько раз подряд повторил одни и те же вызовы инструментов"
       : fullHit ? "Контекст почти заполнен"
-      : guidedLimitHit ? `В управляемом режиме исчерпан лимит действий этого порученного этапа (${cfg.guidedToolRounds} раунда)`
+      : guidedLimitHit ? `В управляемом режиме исчерпан лимит действий этого порученного этапа (${guidedRounds} раунда)`
       : `Достигнут лимит: ${cfg.maxToolRounds} раундов инструментов за ход`;
     const tail = guidedLimitHit && !loopHit && !fullHit
       ? "Подведи итог именно по порученному этапу по уже полученным результатам, перечисли находки и неопределённости и предложи следующие шаги, но не начинай их — управление возвращается пользователю. Если этап не завершён, прямо так и скажи («этап не завершён»), где остановился и что осталось сделать."
       : "Дай итоговый ответ по уже полученным результатам (они выше); если данных не хватает — скажи, что ещё нужно проверить.";
-    msgs.push({ role: "user", content: `[whitehat] ${reason}. Инструменты на этот ход отключены. Не вызывай их и не пиши <tool_call>. ${tail}` });
+    const collect = limitHit ? await collectFreshJobOutput(state, run.taskId, run.signal).catch(() => "") : "";
+    msgs.push({ role: "user", content: `[whitehat] ${reason}. Инструменты на этот ход отключены. Не вызывай их и не пиши <tool_call>. ${tail}${collect ? `\n\n${collect}` : ""}` });
   }
   // Советник при застревании: инструменты НЕ снимаем (это не лимит, а пинок сменить ветку) — вставляем
   // эфемерную сводку известного только в этот вызов, как подсказку лимита выше; в историю не пишется.
   const stuckHit = allowTools && cfg.stuckRounds > 0 && state.stuckRounds >= cfg.stuckRounds && state.stuckAdvised < 3 && !run.signal.aborted;
   if (stuckHit) {
     msgs.push({ role: "user", content: `[whitehat] Советник при застревании: несколько раундов подряд действия не дали новых фактов (ошибки, пустые или уже виденные результаты). Известное сейчас: ${knownSummary(run.taskId)}. Не продолжай эту ветку новыми формулировками тех же проверок. Смени подход: другой вектор или поверхность из плана, сверка с базой по сервису/версии (search_docs), иной инструмент — либо подведи итог этапа и спроси пользователя, куда дальше. Что не сработало — зафиксируй в плане (blocked + note), чтобы не ходить по кругу.` });
+  }
+  // Предупреждение о подходе к границе этапа: без него модель отправляла job_input последним раундом
+  // и честно писала «вывод забрать не успел». Эфемерно, как советник выше.
+  const leftRounds = run.mode === "guided" ? guidedRounds - state.actionRounds : Number.POSITIVE_INFINITY;
+  if (allowTools && leftRounds > 0 && leftRounds <= 2 && state.toolRounds > 0) {
+    msgs.push({ role: "user", content: `[whitehat] До конца порученного этапа осталось раундов действий: ${leftRounds}. Планируй финал: не отправляй ввод или команду, вывод которой не успеешь прочитать (job_input без последующего job_output — потерянный результат); чтение job_output, справки и sleep бюджет действий не тратят. Если результат этапа уже виден — подводи итог сейчас.` });
   }
   run.emit({ type: "assistant_start" });
   const toolList = subOn ? [...TOOLS, SPAWN_TOOL] : TOOLS;

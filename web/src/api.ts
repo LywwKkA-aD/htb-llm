@@ -15,7 +15,7 @@ export type SectionPub<T> = { active: Preset } & Record<Preset, T>;
 export type EmbedIndexInfo = { model: string; url: string; dim: number; chunks: number; stale: boolean; builtAt: number | null };
 export type ReindexState = { running: boolean; done: number; total: number; error: string | null; startedAt: number; finishedAt: number };
 export type KnowledgeState = { running: boolean; lines: string[]; error: string | null; startedAt: number; finishedAt: number };
-export type AgentsSettings = { subagents: boolean; maxPerTurn: number; maxRounds: number };
+export type AgentsSettings = { subagents: boolean; maxPerTurn: number; maxRounds: number; guidedRounds: number };
 export type AppSettings = { llm: SectionPub<LlmPub>; embed: SectionPub<EndpointPub>; agents: AgentsSettings; openrouterMgmt: { apiKeySet: boolean }; embedIndex: EmbedIndexInfo; reindex: ReindexState; knowledge: KnowledgeState };
 export type OrStats = {
   fetchedAt: number; hasInferenceKey: boolean; hasManagementKey: boolean;

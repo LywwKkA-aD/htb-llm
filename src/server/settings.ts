@@ -16,7 +16,7 @@ export type LlmCfg = EndpointCfg & { ctxWindow: number; compactAt: number };
 export type Section<T extends EndpointCfg> = { active: Preset } & Record<Preset, T>;
 // Подагенты (spawn_subagent): делегирование подзадач отдельной модели с чистым контекстом.
 // Доступны только на внешних пресетах — локальная Qwen одна, и параллельные ходы ей вредят.
-export type AgentsSettings = { subagents: boolean; maxPerTurn: number; maxRounds: number };
+export type AgentsSettings = { subagents: boolean; maxPerTurn: number; maxRounds: number; guidedRounds: number };
 // Management-ключ OpenRouter (provisioning): отдельный от инференс-ключей, нужен статистике
 // расходов (/activity, /keys). Создаётся на openrouter.ai → Settings → Management Keys.
 export type OpenRouterMgmt = { apiKey: string };
@@ -39,7 +39,7 @@ export function defaultSettings(): AppSettings {
       openrouter: ep(OPENROUTER_URL, "cohere/embed-5-fast"),
       custom: ep("", ""),
     },
-    agents: { subagents: false, maxPerTurn: 3, maxRounds: 8 },
+    agents: { subagents: false, maxPerTurn: 3, maxRounds: 8, guidedRounds: cfg.guidedToolRounds },
     openrouterMgmt: { apiKey: "" },
   };
 }
@@ -172,6 +172,7 @@ function cleanAgents(raw: any, prev: AgentsSettings): AgentsSettings {
     subagents: raw.subagents !== undefined ? raw.subagents === true : prev.subagents,
     maxPerTurn: num(raw.maxPerTurn, "макс. подагентов за ход", 1, 10, prev.maxPerTurn),
     maxRounds: num(raw.maxRounds, "макс. раундов подагента", 1, 30, prev.maxRounds),
+    guidedRounds: num(raw.guidedRounds, "раундов действий на этап", 3, 24, prev.guidedRounds),
   };
 }
 
