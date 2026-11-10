@@ -423,6 +423,14 @@ async function recallNode(state: S, config: LangGraphRunnableConfig) {
   // Профиль цели: уже найденные сервисы, креды и доступы — чтобы не пересканировать и не терять между чатами.
   const profileItems = listProfile(run.taskId);
   if (profileItems.length) parts.push(`Профиль цели (ведёшь через profile_update; если новый вывод противоречит записи — обнови её):\n${formatProfile(profileItems)}`);
+  // Восстановление доступа: в профиле доступ есть, а живых сессий нет (респаун машины, умер шелл) —
+  // без подсказки модель начинала энумерацию с нуля, хотя рецепт захода уже записан.
+  const accesses = profileItems.filter((i) => i.kind === "access");
+  if (accesses.length) {
+    const jobs = await sandbox.listJobs(run.taskId).catch(() => []);
+    if (!jobs.some((j) => j.running))
+      parts.push(`ВНИМАНИЕ: по профилю доступ уже получали (${accesses.slice(0, 2).map((a) => clip(a.text, 140)).join("; ")}), но живых job-сессий сейчас нет — машина могла быть сброшена или шелл умер. Не начинай энумерацию сначала: восстанови доступ по рецепту из профиля и памяти (search_memory по вектору входа), проверяя выводом каждый шаг; если рецепт больше не работает — скажи, на каком шаге сломался.`);
+  }
   // Команды самого пользователя в ЕГО терминале: модель почти никогда не зовёт user_history сама (0 вызовов
   // в реальных чатах), а работа между ходами теряется. Последние свежие команды — прямо в контекст хода.
   const myCmds = (await sandbox.userHistory(run.taskId, 6).catch(() => []))
