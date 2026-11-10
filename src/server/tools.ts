@@ -18,6 +18,7 @@ import * as ffuf from "./ffuf.ts";
 import * as sqlmap from "./sqlmap.ts";
 import * as privesc from "./privesc.ts";
 import * as credcheck from "./credcheck.ts";
+import * as caido from "./caido.ts";
 import { cronChainHint, enumDigest, passwordPromptHint, shellCatchHint } from "./shellhint.ts";
 import { subnetCalc } from "./subnet.ts";
 import { looksLikeWriteup, SPOILER_BLOCK_TEXT } from "./spoilers.ts";
@@ -256,6 +257,51 @@ export const TOOLS = [
           services: { type: "array", items: { type: "string" }, description: "протоколы netexec: smb, winrm, ssh, ftp, mssql, ldap, rdp, wmi, vnc; пусто — из профиля по портам" },
         },
         required: ["username", "secret"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "caido_history",
+      description:
+        "История HTTP-трафика прокси Caido этой задачи (браузер задачи и всё, что ходило через прокси): последние запросы одной строкой — #id, метод, URL, статус и размер ответа. Смотри сюда, чтобы понять, что пользователь уже делал в браузере (логины, формы, API-вызовы веба цели), вместо повторной энумерации. Требует включённый пользователем прокси (вкладка «Прокси»); проект Caido при отсутствии выберет/создаст сам.",
+      parameters: {
+        type: "object",
+        properties: {
+          limit: { type: "integer", description: "сколько последних запросов (по умолчанию 20, максимум 50)" },
+          host_contains: { type: "string", description: "фильтр: подстрока в host+path" },
+          method: { type: "string", description: "фильтр по HTTP-методу (GET, POST…)" },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "caido_request",
+      description:
+        "Полный сырой запрос и ответ из истории Caido по #id из caido_history: заголовки, куки, тела — как есть. Для разбора, чем именно браузер цели авторизовался, какие параметры реально уходили и что вернул сервер.",
+      parameters: {
+        type: "object",
+        properties: { id: { type: "string", description: "id запроса из caido_history" } },
+        required: ["id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "caido_replay",
+      description:
+        "Повторить захваченный в Caido запрос (replay) и вернуть новый ответ. raw — необязательный полный сырой HTTP-запрос взамен исходного (правка параметра, заголовка, тела); соединение (host/port/TLS) берётся из исходного запроса. Результат также падает в историю Caido с пометкой REPLAY — виден пользователю в панели прокси.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "id исходного запроса из caido_history" },
+          raw: { type: "string", description: "полный сырой запрос с правкой (строка запроса, заголовки, пустая строка, тело); пусто — повтор как есть" },
+        },
+        required: ["id"],
       },
     },
   },
@@ -705,6 +751,25 @@ export async function runTool(name: string, rawArgs: string, ctx: ToolCtx): Prom
         if (!r.ok) return `ошибка: ${r.error}`;
         const inj = injectionWarning(r.text);
         return inj ? `${r.text}\n${inj}` : r.text;
+      }
+      case "caido_history": {
+        const out = await caido.caidoHistory(ctx.taskId, {
+          limit: Math.trunc(Number(a.limit)) || undefined,
+          hostContains: a.host_contains ? String(a.host_contains) : undefined,
+          method: a.method ? String(a.method) : undefined,
+        });
+        const inj = injectionWarning(out);
+        return inj ? `${out}\n${inj}` : out;
+      }
+      case "caido_request": {
+        const out = await caido.caidoRequestDetail(ctx.taskId, String(a.id ?? ""));
+        const inj = injectionWarning(out);
+        return inj ? `${out}\n${inj}` : out;
+      }
+      case "caido_replay": {
+        const out = await caido.caidoReplay(ctx.taskId, String(a.id ?? ""), a.raw ? String(a.raw) : undefined, ctx.signal);
+        const inj = injectionWarning(out);
+        return inj ? `${out}\n${inj}` : out;
       }
       case "cred_check": {
         const opts: credcheck.CredCheckOpts = {
