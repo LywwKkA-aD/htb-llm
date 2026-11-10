@@ -551,4 +551,20 @@ test.describe("задачи и чаты: жизненный цикл и сайд
     expect(sys).not.toContain("(курс:");
     expect(sys).not.toContain("OSPF");
   });
+
+  test("удаление задачи прямо из списка (корзина в строке, не только диалог правки)", async ({ page, request }) => {
+    const p = await createTask(request, "Удаляемая из списка");
+    const q = await createTask(request, "Остающаяся из списка");
+    await openAt(page, q.task.id, q.chat.id);
+    const row = page.locator(`[data-testid="task-row-delete"][data-task-id="${p.task.id}"]`);
+    await taskItem(page, p.task.id).hover();
+    await row.click();
+    await expect(page.getByTestId("confirm-dialog")).toContainText("Удаляемая из списка");
+    await page.getByTestId("confirm-ok").click();
+    await expect(page.getByTestId("toast").filter({ hasText: "задача удалена" })).toBeVisible({ timeout: 30_000 });
+    await expect(taskItem(page, p.task.id)).toHaveCount(0);
+    expect((await request.get(`/api/tasks/${p.task.id}`)).status()).toBe(404);
+    // текущая задача не пострадала и остаётся выбранной
+    await expect(taskItem(page, q.task.id)).toHaveAttribute("aria-current", "true");
+  });
 });

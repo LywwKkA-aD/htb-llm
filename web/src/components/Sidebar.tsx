@@ -278,6 +278,7 @@ type Props = {
   onNewTask: () => void;
   onNewChat: () => void;
   onDeleteChat: (id: string) => void;
+  onDeleteTask: (id: string) => void;
   onImportedTask?: (taskId: string, chatId: string) => void;
 };
 
@@ -334,24 +335,41 @@ export function Sidebar(p: Props) {
           const sel = t.id === p.taskId;
           return (
             <div key={t.id} className="mb-0.5">
-              <button
-                data-testid="task-item"
-                data-task-id={t.id}
-                aria-current={sel}
-                onClick={() => p.onTask(t.id)}
-                className={cx(
-                  "relative block w-full rounded-lg px-3 py-2 text-left transition-colors",
-                  sel ? "bg-surface-2" : "hover:bg-surface-2",
-                )}
-              >
-                <div className={cx("truncate text-[13px]", sel ? "font-medium text-fg" : "text-fg-2")} title={t.title}>{t.title}</div>
-                <div className="mt-0.5 flex items-center gap-2 text-[11px] text-dim">
-                  <Dot state={t.container === "running" ? "ok" : t.container === "stopped" ? "mid" : "off"} title={`контейнер: ${t.container}`} />
-                  {t.course && <span className="truncate" title={t.course}>{t.course}</span>}
-                  <span className="inline-flex items-center gap-1" title="подтверждённых карточек памяти"><Brain size={11} />{t.memories ?? 0}</span>
-                  {!!t.pending && <Badge>{t.pending}</Badge>}
-                </div>
-              </button>
+              <div className={cx("group relative flex items-stretch rounded-lg transition-colors", sel ? "bg-surface-2" : "hover:bg-surface-2")}>
+                <button
+                  data-testid="task-item"
+                  data-task-id={t.id}
+                  aria-current={sel}
+                  onClick={() => p.onTask(t.id)}
+                  className="relative block min-w-0 flex-1 rounded-lg px-3 py-2 text-left"
+                >
+                  <div className={cx("truncate text-[13px]", sel ? "font-medium text-fg" : "text-fg-2")} title={t.title}>{t.title}</div>
+                  <div className="mt-0.5 flex items-center gap-2 text-[11px] text-dim">
+                    <Dot state={t.container === "running" ? "ok" : t.container === "stopped" ? "mid" : "off"} title={`контейнер: ${t.container}`} />
+                    {t.course && <span className="truncate" title={t.course}>{t.course}</span>}
+                    <span className="inline-flex items-center gap-1" title="подтверждённых карточек памяти"><Brain size={11} />{t.memories ?? 0}</span>
+                    {!!t.pending && <Badge>{t.pending}</Badge>}
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  title="удалить задачу"
+                  aria-label={`удалить задачу «${t.title}»`}
+                  data-testid="task-row-delete"
+                  data-task-id={t.id}
+                  className="flex flex-none items-center rounded-r-lg pr-2.5 text-dim opacity-0 outline-none group-focus-within:opacity-100 group-hover:opacity-100 hover:text-err focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-accent/40"
+                  onClick={async () => {
+                    const ok = await confirm({
+                      title: "Удалить задачу?",
+                      message: <>Будут удалены: чаты, память задачи, вложения и Kali-контейнер <span className="text-fg">«{t.title}»</span> вместе с файлами в /work. Это нельзя отменить. Совет: сначала скачай экспорт из панели «Файлы».</>,
+                      confirmText: "удалить навсегда", danger: true,
+                    });
+                    if (ok) p.onDeleteTask(t.id);
+                  }}
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
               {sel && (
                 <div className="mt-1 mb-2 ml-[18px] border-l border-line-2 pl-2" data-testid="chat-list">
                   {p.chats.map((c) => (

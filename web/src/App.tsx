@@ -274,6 +274,13 @@ function App() {
     } catch (e: any) { toast("error", e.message); }
   };
   const selectChat = (id: string) => { setChatId(id); reloadChats(); };
+  // общее удаление задачи: диалог редактирования и корзина в списке задач идут одним путём
+  const deleteTaskById = async (id: string) => {
+    ownDeleted.current.add(id);
+    try { await api.deleteTask(id); toast("success", "задача удалена"); } catch (e: any) { if (!isGone(e)) toast("error", e.message); }
+    if (taskIdRef.current === id) { selectTask(null); setChatId(null); setChats([]); setChatsFor(null); }
+    await loadTasks().catch(() => {});
+  };
   // открытый чат или его задачу удалили в другой вкладке (сервер ответил 404) — перечитать и выбрать другое;
   // draft — набранное в удалённом чате, чтобы перенести его в следующий выбранный чат задачи
   const onGone = useCallback((draft?: { text: string; images: string[] }) => {
@@ -342,6 +349,7 @@ function App() {
           health={health} tasks={tasks} chats={taskChats} taskId={taskId} chatId={chatId} taskQuery={searchable ? taskQuery : ""}
           onTask={selectTask} onChat={selectChat} onNewTask={() => setDialog("new")} onNewChat={() => void newChat()}
           onImportedTask={(tid, cid) => { void refresh(); selectTask(tid); setChatId(cid); }}
+          onDeleteTask={(id) => void deleteTaskById(id)}
           onDeleteChat={async (id) => {
             const tid = taskIdRef.current;
             ownDeleted.current.add(id);
@@ -449,10 +457,7 @@ function App() {
         }}
         onDelete={dialog === "edit" && task ? async () => {
           setDialog(null);
-          ownDeleted.current.add(task.id);
-          try { await api.deleteTask(task.id); toast("success", "задача удалена"); } catch (e: any) { if (!isGone(e)) toast("error", e.message); }
-          selectTask(null); setChatId(null); setChats([]); setChatsFor(null);
-          await loadTasks().catch(() => {});
+          await deleteTaskById(task.id);
         } : undefined}
       />
     </div>
