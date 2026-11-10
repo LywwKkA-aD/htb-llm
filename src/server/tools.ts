@@ -16,6 +16,7 @@ import { exploitHints } from "./exploits.ts";
 import * as nmap from "./nmap.ts";
 import * as ffuf from "./ffuf.ts";
 import * as sqlmap from "./sqlmap.ts";
+import * as privesc from "./privesc.ts";
 import { cronChainHint, enumDigest, passwordPromptHint, shellCatchHint } from "./shellhint.ts";
 import { subnetCalc } from "./subnet.ts";
 import { looksLikeWriteup, SPOILER_BLOCK_TEXT } from "./spoilers.ts";
@@ -219,6 +220,22 @@ export const TOOLS = [
           timeout_sec: { type: "integer", description: "таймаут в секундах (по умолчанию 600, максимум 900)" },
         },
         required: ["url"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "privesc_enum",
+      description:
+        "Локальная энумерация Linux после шелла одним вызовом: сервер отправляет в пойманную сессию (job) бандл чеклиста повышения — id/ОС/ядро, sudo -n -l, SUID, capabilities, cron и /etc/cron.d, systemd-таймеры и incron, процессы, слушающие порты (в т.ч. localhost), записываемое в /etc — дожидается конца и возвращает вывод секциями с выжимкой кандидатов, а связку юзер@хост/ОС записывает фактом в профиль. Начинай PrivEsc с него вместо ручного перебора теми же командами по одной; дальше углубляйся по секциям (цепочки исполнения, GTFOBins). Нужен живой job с шеллом на цели.",
+      parameters: {
+        type: "object",
+        properties: {
+          job: { type: "string", description: "id или имя job с пойманным шеллом на цели" },
+          timeout_sec: { type: "integer", description: "сколько ждать бандл (по умолчанию 90, максимум 240)" },
+        },
+        required: ["job"],
       },
     },
   },
@@ -662,6 +679,12 @@ export async function runTool(name: string, rawArgs: string, ctx: ToolCtx): Prom
         const out = sqlmap.formatSqlmap(r);
         const inj = r.ok ? injectionWarning(out) : null;
         return inj ? `${out}\n${inj}` : out;
+      }
+      case "privesc_enum": {
+        const r = await privesc.runPrivescEnum(ctx.taskId, String(a.job ?? ""), Math.trunc(Number(a.timeout_sec)) || undefined, ctx.signal);
+        if (!r.ok) return `ошибка: ${r.error}`;
+        const inj = injectionWarning(r.text);
+        return inj ? `${r.text}\n${inj}` : r.text;
       }
       case "plan_update": {
         const action = String(a.action ?? "");
