@@ -248,4 +248,29 @@ test.describe("VPN задачи в контейнере (HTB)", () => {
     await expect(page.getByTestId("vpn-proto-warn")).toContainText("UDP");
     await request.delete(`/api/tasks/${created.task.id}`);
   });
+
+  // Живой баг: VPN в двух задачах одним сертификатом HTB — сессии крадут друг у друга туннель
+  // по ping-restart каждые ~2 минуты («VPN постоянно отваливается»). Старт во второй гасит первую.
+  test("один сертификат — одна сессия: старт VPN во второй задаче гасит туннель первой", async ({ request }) => {
+    test.setTimeout(300_000); // каждый старт ждёт поднятия до 25 с
+    const up1 = await uploadCfg(request, ids.task.id, "machines_eu.ovpn", OVPN);
+    expect(up1.ok(), await up1.text()).toBeTruthy();
+    const s1 = await request.post(`/api/tasks/${ids.task.id}/vpn/start`, { timeout: 90_000 });
+    expect(s1.ok(), await s1.text()).toBeTruthy();
+    expect((await vpnGet(request, ids.task.id)).status.state).toBe("connecting");
+    const t2 = await (await request.post("/api/tasks", { data: { title: "VPN вторая", course: "Сети", brief: "тест одного туннеля" } })).json();
+    try {
+      const up = await uploadCfg(request, t2.task.id, "machines_eu.ovpn", OVPN);
+      expect(up.ok(), await up.text()).toBeTruthy();
+      const s2 = await request.post(`/api/tasks/${t2.task.id}/vpn/start`, { timeout: 90_000 });
+      expect(s2.ok(), await s2.text()).toBeTruthy();
+      expect((await s2.json()).stoppedOthers).toContain("VPN HTB");
+      expect((await vpnGet(request, ids.task.id)).status.state).toBe("down");
+      expect((await vpnGet(request, t2.task.id)).status.state).toBe("connecting");
+    } finally {
+      await request.post(`/api/tasks/${t2.task.id}/vpn/stop`).catch(() => {});
+      await request.delete(`/api/tasks/${t2.task.id}`).catch(() => {});
+      await request.post(`/api/tasks/${ids.task.id}/vpn/stop`).catch(() => {});
+    }
+  });
 });

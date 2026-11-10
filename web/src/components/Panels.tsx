@@ -257,7 +257,13 @@ export function VpnPanel({ task, onChanged }: { task: Task; onChanged?: (info: V
   const act = async (key: string, fn: () => Promise<VpnInfo>, msg?: string) => {
     const id = task.id;
     busyRef.current = true; setBusy(key);
-    try { apply(id, await fn()); if (msg && cur.current === id) toast("success", msg); }
+    try {
+      const v = await fn();
+      apply(id, v);
+      if (v.stoppedOthers?.length && cur.current === id)
+        toast("info", `VPN в «${v.stoppedOthers.join("», «")}» остановлен: у аккаунта HTB одна сессия на сертификат — два туннеля дерутся и падают по очереди`);
+      if (msg && cur.current === id) toast("success", msg);
+    }
     catch (e: any) { if (cur.current === id) toast("error", e.message); }
     busyRef.current = false; setBusy(null);
     void load();
@@ -268,7 +274,7 @@ export function VpnPanel({ task, onChanged }: { task: Task; onChanged?: (info: V
   const up = st?.state === "up";
   return (
     <div className="px-4 py-4" data-testid="vpn-panel">
-      <Note>OpenVPN или WireGuard поднимается <span className="text-fg">внутри Kali-контейнера задачи</span>: обратные соединения от машин HTB приходят прямо на листенер в контейнере, любой порт. Одно подключение HTB на аккаунт — OpenVPN на хосте с тем же конфигом перед этим отключи.</Note>
+      <Note>OpenVPN или WireGuard поднимается <span className="text-fg">внутри Kali-контейнера задачи</span>: обратные соединения от машин HTB приходят прямо на листенер в контейнере, любой порт. Одно подключение HTB на аккаунт: OpenVPN на хосте с тем же конфигом отключи, а туннель в другой задаче при старте здесь остановится сам — два VPN на одном сертификате крадут сессию друг у друга и падают каждые ~2 минуты.</Note>
 
       <SectionTitle testid="vpn-status-title"><Network size={13} className="text-accent" /> состояние</SectionTitle>
       <div className="mb-4 rounded-[10px] border border-line bg-surface px-3 py-2.5" data-testid="vpn-status" data-state={st?.state ?? "loading"}>

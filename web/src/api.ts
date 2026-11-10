@@ -56,6 +56,7 @@ export type VpnInfo = {
   container: "running" | "stopped" | "missing";
   containerIp: string | null;
   status: { state: "down" | "connecting" | "up"; iface?: string; ip?: string; log: string[]; socks: { running: boolean; url?: string } };
+  stoppedOthers?: string[];
 };
 export type BrowserInfo = {
   running: boolean;

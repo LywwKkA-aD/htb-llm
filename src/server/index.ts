@@ -623,12 +623,14 @@ app.delete("/api/tasks/:id/vpn/config", wrap(async (req) => {
 app.post("/api/tasks/:id/vpn/:action", wrap(async (req) => {
   const id = P(req, "id"), a = P(req, "action");
   if (!taskExists(id)) throw new HttpError(404, "нет такой задачи");
-  if (a === "start") await sandbox.startVpn(id);
+  let stoppedOthers: string[] = [];
+  if (a === "start") { stoppedOthers = await sandbox.stopOtherVpns(id); await sandbox.startVpn(id); }
   else if (a === "stop") await sandbox.stopVpn(id);
   else if (a === "socks-start") await sandbox.startSocks(id);
   else if (a === "socks-stop") await sandbox.stopSocks(id);
   else throw new Error("неизвестное действие");
-  return vpnPayload(id);
+  const payload = await vpnPayload(id);
+  return stoppedOthers.length ? { ...payload, stoppedOthers } : payload;
 }));
 
 // ---------- встроенный браузер задачи (Selkies-Firefox в netns контейнера) ----------

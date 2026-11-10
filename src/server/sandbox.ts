@@ -1715,6 +1715,25 @@ async function stopVpnLocked(taskId: string): Promise<VpnStatus> {
 export const startVpn = (taskId: string) => withVpnLock(taskId, () => startVpnLocked(taskId));
 export const stopVpn = (taskId: string) => withVpnLock(taskId, () => stopVpnLocked(taskId));
 
+// Один сертификат HTB = одна сессия: два поднятых туннеля в разных задачах получают один ifconfig-IP
+// и по ping-restart (120 с) по очереди крадут сессию друг у друга — выглядит как «VPN постоянно
+// отваливается» (живой случай: Connected 19 реинициализаций против Enigma). Перед стартом VPN здесь
+// гасим туннели во всех остальных задачах и возвращаем их названия для тоста/заметок.
+export async function stopOtherVpns(exceptTaskId: string): Promise<string[]> {
+  const rows = db.prepare("select id, title from tasks where id<>?").all(exceptTaskId) as { id: string; title: string }[];
+  const stopped: string[] = [];
+  for (const t of rows) {
+    const st = await vpnStatus(t.id).catch(() => DOWN);
+    if (st.state === "down") continue;
+    await stopVpn(t.id).catch(() => {});
+    agentNote(t.id, "VPN остановлен автоматически: туннель подняли в другой задаче — один сертификат HTB держит одну сессию, два туннеля дерутся за неё по ping-restart");
+    stopped.push(t.title);
+  }
+  if (stopped.length)
+    agentNote(exceptTaskId, `VPN: остановил туннель в ${stopped.map((t) => `«${t}»`).join(", ")} — один сертификат HTB = одна сессия, иначе оба VPN падают по ping-restart каждые ~2 минуты`);
+  return stopped;
+}
+
 export async function deleteVpnConfig(taskId: string): Promise<void> {
   await withVpnLock(taskId, async () => {
     await stopVpnLocked(taskId).catch(() => {});
