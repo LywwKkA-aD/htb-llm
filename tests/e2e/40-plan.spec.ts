@@ -201,4 +201,30 @@ test.describe("план решения задачи", () => {
     await expect(page.getByTestId("plan-item")).toHaveCount(0);
     await expect(page.getByTestId("plan-phase")).toHaveCount(0);
   });
+
+  test("шаблоны плана: API применяет с дедупом, плохой вид — ошибка", async ({ request }) => {
+    const tpl = (kind: string) => request.post(`/api/tasks/${ids.task.id}/plan/template`, { data: { kind } });
+    const r1 = await tpl("privesc");
+    expect(r1.ok(), await r1.text()).toBeTruthy();
+    const j1 = await r1.json();
+    expect(j1.added).toBe(6);
+    expect(j1.items.every((i: any) => i.phase === "PrivEsc")).toBeTruthy();
+    expect(j1.items.map((i: any) => i.text).join(" ")).toContain("namei");
+    expect((await (await tpl("privesc")).json()).added).toBe(0); // повтор не плодит дубли
+    const jm = await (await tpl("machine")).json();
+    expect(jm.added).toBe(5);
+    expect(new Set(jm.items.map((i: any) => i.phase))).toContain("Recon");
+    expect((await tpl("nope")).status()).toBe(400);
+  });
+
+  test("панель «План»: кнопка чеклиста PrivEsc добавляет подпункты", async ({ page, request }) => {
+    const chat = await (await request.post(`/api/tasks/${ids.task.id}/chats`)).json();
+    await openTask(page, { task: ids.task, chat });
+    await page.getByTestId("tab-plan").click();
+    await expect(page.getByTestId("plan-panel")).toBeVisible();
+    await page.getByTestId("plan-template-privesc").click();
+    await expect(page.getByTestId("plan-panel")).toContainText("Цепочки исполнения root");
+    await expect(page.getByTestId("plan-item")).toHaveCount(6);
+    await expect.poll(async () => (await planItems(request, ids.task.id)).length).toBe(6);
+  });
 });

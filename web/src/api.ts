@@ -164,6 +164,7 @@ export const api = {
   jobDelete: (taskId: string, id: string) => j(`/api/tasks/${taskId}/jobs/${id}`, json("DELETE")),
   plan: (taskId: string) => j<{ items: PlanItem[]; phases: readonly string[] }>(`/api/tasks/${taskId}/plan`),
   planAdd: (taskId: string, phase: string, text: string) => j<PlanItem>(`/api/tasks/${taskId}/plan`, json("POST", { phase, text })),
+  planTemplate: (taskId: string, kind: "machine" | "privesc") => j<{ added: number; items: PlanItem[] }>(`/api/tasks/${taskId}/plan/template`, json("POST", { kind })),
   planUpdate: (taskId: string, id: string, patch: Partial<Pick<PlanItem, "status" | "note" | "text" | "phase">>) => j<PlanItem>(`/api/tasks/${taskId}/plan/${id}`, json("PATCH", patch)),
   planDelete: (taskId: string, id: string) => j(`/api/tasks/${taskId}/plan/${id}`, json("DELETE")),
   profile: (taskId: string) => j<{ items: ProfileItem[]; kinds: readonly ProfileKind[] }>(`/api/tasks/${taskId}/profile`),

@@ -41,6 +41,41 @@ export function addPlanItem(taskId: string, phase: unknown, textRaw: unknown, st
   return item;
 }
 
+// Шаблоны одной кнопкой из панели: модель фазу PrivEsc часто вела одним пунктом, и закрытые
+// векторы терялись. Дедуп по нормализованному тексту внутри фазы — повторный клик ничего не плодит.
+export const PLAN_TEMPLATES: Record<string, { phase: string; text: string }[]> = {
+  machine: [
+    { phase: "Recon", text: "Скан портов: все порты, затем версии сервисов" },
+    { phase: "Enumeration", text: "Энумерация каждого сервиса из профиля цели" },
+    { phase: "Foothold", text: "Точка входа: стабильный шелл с TTY" },
+    { phase: "User", text: "Флаг user.txt" },
+    { phase: "Root", text: "Флаг root.txt" },
+  ],
+  privesc: [
+    { phase: "PrivEsc", text: "sudo -l, SUID и capabilities (GTFOBins по именам бинарей)" },
+    { phase: "PrivEsc", text: "Цепочки исполнения root: cron/таймеры/incron/сервисы → что подключают → namei по звеньям" },
+    { phase: "PrivEsc", text: "Процессы root и сервисы на localhost (ps, ss -tlnp, pspy)" },
+    { phase: "PrivEsc", text: "Группы docker/lxd/disk и NFS no_root_squash" },
+    { phase: "PrivEsc", text: "Пароли в файлах, другие пользователи, переиспользование кред" },
+    { phase: "PrivEsc", text: "Ядро (linux-exploit-suggester) — только после остальных пунктов" },
+  ],
+};
+
+export function applyPlanTemplate(taskId: string, kindRaw: unknown): { added: number; items: PlanItem[] } {
+  const kind = String(kindRaw ?? "");
+  const tpl = PLAN_TEMPLATES[kind];
+  if (!tpl) throw new Error(`нет такого шаблона плана: ${kind}; есть: ${Object.keys(PLAN_TEMPLATES).join(", ")}`);
+  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
+  const have = new Set(listPlan(taskId).map((i) => `${i.phase.toLowerCase()}|${norm(i.text)}`));
+  let added = 0;
+  for (const t of tpl) {
+    if (have.has(`${t.phase.toLowerCase()}|${norm(t.text)}`)) continue;
+    addPlanItem(taskId, t.phase, t.text);
+    added++;
+  }
+  return { added, items: listPlan(taskId) };
+}
+
 export function updatePlanItem(taskId: string, id: string, patch: { status?: unknown; note?: unknown; text?: unknown; phase?: unknown }): PlanItem {
   const cur = db.prepare("select id, phase, text, status, note, sort from plan_items where task_id=? and id=?").get(taskId, id) as PlanItem | undefined;
   if (!cur) {

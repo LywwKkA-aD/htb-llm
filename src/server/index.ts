@@ -340,6 +340,11 @@ app.post("/api/tasks/:id/plan", wrap((req) => {
   if (!taskExists(id)) throw new HttpError(404, "нет такой задачи");
   return plan.addPlanItem(id, req.body?.phase, req.body?.text, req.body?.status);
 }));
+app.post("/api/tasks/:id/plan/template", wrap((req) => {
+  const id = P(req, "id");
+  if (!taskExists(id)) throw new HttpError(404, "нет такой задачи");
+  return plan.applyPlanTemplate(id, req.body?.kind);
+}));
 app.patch("/api/tasks/:id/plan/:item", wrap((req) => {
   const id = P(req, "id");
   if (!taskExists(id)) throw new HttpError(404, "нет такой задачи");

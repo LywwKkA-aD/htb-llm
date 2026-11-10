@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CheckCircle2, Circle, CircleDot, OctagonAlert, Plus, SkipForward, X } from "lucide-react";
+import { CheckCircle2, Circle, CircleDot, ListChecks, OctagonAlert, Plus, SkipForward, X } from "lucide-react";
 import { api, type PlanItem, type PlanStatus, type Task } from "../api";
 import { Button, Input, cx, useToast } from "../ui";
 
@@ -86,6 +86,15 @@ export function PlanPanel({ task, onChanged }: { task: Task; onChanged?: () => v
     await act(() => api.planAdd(task.id, phase, v));
   };
 
+  const applyTemplate = async (kind: "machine" | "privesc") => {
+    try {
+      const r = await api.planTemplate(task.id, kind);
+      await load(true);
+      onChanged?.();
+      toast(r.added ? "success" : "info", r.added ? `шаблон применён: добавлено пунктов — ${r.added}` : "шаблон уже применён: новых пунктов нет");
+    } catch (e: any) { toast("error", e.message); }
+  };
+
   const startNoteEdit = (i: PlanItem) => {
     noteCancel.current = false;
     setNoteDraft(i.note);
@@ -120,6 +129,12 @@ export function PlanPanel({ task, onChanged }: { task: Task; onChanged?: () => v
             в каждый ход. Можно добавить пункты самому ниже: клик по иконке меняет статус, по заметке — правит её.
           </>
         )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="inline-flex items-center gap-1 text-[11px] tracking-[0.08em] text-faint uppercase"><ListChecks size={12} /> шаблоны</span>
+        <Button size="sm" variant="ghost" data-testid="plan-template-machine" onClick={() => void applyTemplate("machine")}>Каркас машины</Button>
+        <Button size="sm" variant="ghost" data-testid="plan-template-privesc" onClick={() => void applyTemplate("privesc")}>Чеклист PrivEsc</Button>
       </div>
 
       {orderedPhases.map((ph) => {
