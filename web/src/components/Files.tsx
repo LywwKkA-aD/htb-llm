@@ -170,6 +170,10 @@ export function FilesPanel({ task }: { task: Task }) {
         <Button variant="ghost" size="icon-sm" title="обновить список" onClick={() => void load()} data-testid="files-refresh">
           <RefreshCw size={13} />
         </Button>
+        <Button variant="ghost" size="sm" data-testid="task-export" title="скачать всю задачу одним .tar.gz: /work, отчёт с планом/профилем/памятью и чаты (без VPN-кред из .whitehat)"
+          onClick={() => { window.location.href = api.taskExportUrl(task.id); }}>
+          <Download size={12} /> экспорт .tar.gz
+        </Button>
       </div>
 
       <div className="space-y-0.5">

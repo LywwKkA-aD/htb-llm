@@ -13,6 +13,7 @@ import * as sandbox from "./sandbox.ts";
 import * as library from "./library.ts";
 import * as memory from "./memory.ts";
 import * as plan from "./plan.ts";
+import * as taskexport from "./taskexport.ts";
 import * as profile from "./profile.ts";
 import { runTurn, stopTurn, stopAndWait, isBusy, getChat, deleteChatState } from "./graph.ts";
 import { listServices, startService, stopService, type ServiceId } from "./services.ts";
@@ -431,6 +432,15 @@ app.get("/api/tasks/:id/files/preview", wrap(async (req) => {
   const id = P(req, "id");
   if (!taskExists(id)) throw new HttpError(404, "нет такой задачи");
   return sandbox.previewWorkFile(id, String(req.query.path ?? ""));
+}));
+app.get("/api/tasks/:id/export", wrap(async (req, res) => {
+  const id = P(req, "id");
+  if (!taskExists(id)) throw new HttpError(404, "нет такой задачи");
+  const task = db.prepare("select * from tasks where id=?").get(id) as Task;
+  const { filename, gz } = taskexport.buildTaskExport(task);
+  res.setHeader("Content-Type", "application/gzip");
+  res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
+  res.send(gz);
 }));
 app.get("/api/tasks/:id/files/download", wrap(async (req, res) => {
   const id = P(req, "id");

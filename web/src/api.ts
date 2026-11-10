@@ -178,6 +178,7 @@ export const api = {
   files: (taskId: string) => j<{ files: WorkFile[] }>(`/api/tasks/${taskId}/files`),
   filePreview: (taskId: string, path: string) => j<WorkFilePreview>(`/api/tasks/${taskId}/files/preview?path=${encodeURIComponent(path)}`),
   fileDownloadUrl: (taskId: string, path: string) => `/api/tasks/${taskId}/files/download?path=${encodeURIComponent(path)}`,
+  taskExportUrl: (taskId: string) => `/api/tasks/${taskId}/export`,
   chats: (taskId: string) => j<Chat[]>(`/api/tasks/${taskId}/chats`),
   newChat: (taskId: string) => j<Chat>(`/api/tasks/${taskId}/chats`, json("POST")),
   renameChat: (id: string, title: string) => j<Chat>(`/api/chats/${id}`, json("PATCH", { title })),
