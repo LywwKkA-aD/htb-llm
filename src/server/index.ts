@@ -199,12 +199,17 @@ const htbHostname = (name: string) => {
   const s = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   return s ? `${s}.htb` : "";
 };
+// Задача по числовому id машины HTB — ТОЧНОЕ совпадение маркера брифа. Префиксный LIKE ловил чужие:
+// Lame #1 матчился в Shocker #108 («открываю Shocker» вместо Lame и перепись её цели IP-ом Lame).
+function findTaskByHtbMachine(machineId: number): Task | undefined {
+  const rows = db.prepare("select * from tasks where brief like 'HTB machine #%'").all() as Task[];
+  return rows.find((t) => htb.machineIdFromBrief(t.brief) === machineId);
+}
 // Активный HTB-инстанс получил новый IP — обновить TARGET/hostname и строку IP в брифе существующей задачи
 // и разнести новый адрес по живому контейнеру (hosts/TASK.md/профиль — sandbox.applyTargetChange).
 async function syncHtbTaskTarget(m: { id: number; name?: string; ip?: string | null } | null | undefined) {
   if (!m?.ip || !isIpv4(m.ip)) return;
-  const marker = `HTB machine #${m.id}`;
-  let t = db.prepare("select * from tasks where brief like ?").get(`${marker}%`) as Task | undefined;
+  let t = findTaskByHtbMachine(m.id);
   if (!t && m.name) {
     // задача создана вручную без маркера импорта: единственный кандидат с hostname этой машины
     const rows = db.prepare("select * from tasks where hostname=?").all(htbHostname(m.name)) as Task[];
@@ -261,7 +266,7 @@ app.post("/api/htb/submit-flag", wrap(async (req) => {
     machineId = (task && htb.machineIdFromBrief(task.brief)) || 0;
   }
   if (!machineId) {
-    const st = await htb.htbStatus();
+    const st = await htbStatusSynced(true);
     machineId = st.activeMachine?.id ?? 0;
   }
   if (!machineId) throw new HttpError(400, "не знаю, для какой машины флаг: укажи machineId, задачу из импорта HTB или запусти машину");
@@ -282,7 +287,7 @@ app.post("/api/htb/import", wrap(async (req) => {
   }
   // одна задача на машину: маркер первой строкой брифа, повторный импорт открывает существующую
   const marker = `HTB machine #${m.id}`;
-  const exist = db.prepare("select * from tasks where brief like ?").get(`${marker}%`) as Task | undefined;
+  const exist = findTaskByHtbMachine(m.id);
   if (exist) {
     syncHtbTaskTarget({ id: m.id, name: m.name, ip: m.ip });
     const task = db.prepare("select * from tasks where id=?").get(exist.id) as Task;

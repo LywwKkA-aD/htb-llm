@@ -23,6 +23,7 @@ const requests = [];
 
 // HTB API-стаб (формы как у настоящего labs.hackthebox.com v4/v5; принимается только test-htb-token-0123456789)
 const HTB_MACHINES = [
+  { id: 77, name: "PrefixBox", os: "Linux", difficulty: 15, difficultyText: "Easy", points: 20, state: "active", free: true, rating: 4.0, authUserInUserOwns: false, authUserInRootOwns: false, ip: null },
   { id: 777, name: "MockBox", os: "Linux", difficulty: 21, difficultyText: "Easy", points: 20, state: "active", free: true, rating: 4.4, authUserInUserOwns: false, authUserInRootOwns: false, ip: null },
   { id: 778, name: "SecondBox", os: "Windows", difficulty: 43, difficultyText: "Medium", points: 30, state: "active", free: true, rating: 4.1, authUserInUserOwns: true, authUserInRootOwns: false, ip: null },
 ];
