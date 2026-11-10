@@ -133,6 +133,30 @@ test.describe("стабильность shell-сессий", () => {
     }
   });
 
+  test("промпт пароля в job: модель получает подсказку, пароль одним вводом проходит", async ({ page, request }) => {
+    test.setTimeout(180_000);
+    const job = await (await request.post(`/api/tasks/${ids.task.id}/jobs`, {
+      data: { name: "pw-sim", command: "bash -c 'read -s -p \"[sudo] password for tester: \" p; echo; if [ \"$p\" = s3cr3t-test ]; then echo PW-OK; else echo PW-BAD; fi; sleep 3'" },
+    })).json();
+    const outApi = async () => (await (await request.get(`/api/tasks/${ids.task.id}/jobs/${job.id}/output?lines=40`)).json()).output as string;
+    try {
+      await expect.poll(outApi, { timeout: 20_000 }).toContain("[sudo] password for tester:");
+      const chat = await (await request.post(`/api/tasks/${ids.task.id}/chats`)).json();
+      await openTask(page, { task: ids.task, chat });
+      await send(page, tt([{ name: "job_output", args: { id: job.id } }]));
+      await waitIdle(page);
+      // подсказка ушла модели в результате job_output, а не осталась только в UI
+      const log = await (await request.get(`/api/chats/${chat.id}/log`)).json();
+      const outs = log.log.filter((x: any) => x.kind === "tool_result").map((x: any) => String(x.data.output));
+      expect(outs.join("\n"), outs.join("\n").slice(-600)).toContain("ждёт пароль");
+      const inp = await request.post(`/api/tasks/${ids.task.id}/jobs/${job.id}/input`, { data: { text: "s3cr3t-test" } });
+      expect(inp.ok(), await inp.text()).toBeTruthy();
+      await expect.poll(outApi, { timeout: 15_000 }).toContain("PW-OK");
+    } finally {
+      await request.post(`/api/tasks/${ids.task.id}/jobs/${job.id}/stop`).catch(() => {});
+    }
+  });
+
   test("job_input «^C» реально прерывает команду в job, а не печатает два символа", async ({ request }) => {
     test.setTimeout(120_000);
     const job = await (await request.post(`/api/tasks/${ids.task.id}/jobs`, {

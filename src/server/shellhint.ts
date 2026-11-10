@@ -75,3 +75,35 @@ export function shellCatchHint(taskId: string, job: { id: string; name: string; 
     return "";
   }
 }
+
+// Детект зависшего промпта пароля в конце экрана job: модель запускает интерактивный sudo/su/ssh,
+// а пароль отдельным вводом не шлёт — следующая обычная команда сгорает как попытка пароля
+// (sudo даёт 3), а со стороны выглядит как «пароль не вводится». Подсказка не чаще раза в 2 минуты на job.
+const PW_PROMPT_RES = [
+  /\[sudo\] password for [^\n:]+:\s*$/,
+  /^\s*Password:\s*$/m,
+  /[\w.-]+@[\w.-]+'s password:\s*$/,
+  /Enter password:\s*$/i,
+];
+const pwHintAt = new Map<string, number>();
+const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
+export function passwordPromptHint(taskId: string, job: { id: string; name: string }, screen: string): string {
+  if (process.env.WH_SHELL_HINTS === "off" || !screen) return "";
+  try {
+    const tail = stripAnsi(screen).slice(-600);
+    const hit = PW_PROMPT_RES.find((rx) => rx.test(tail));
+    if (!hit) return "";
+    // промпт должен быть последним содержательным текстом экрана (ждёт ввода прямо сейчас)
+    const m = hit.exec(tail);
+    if (!m || tail.slice(m.index + m[0].length).trim().length > 0) return "";
+    const key = `${taskId}:${job.id}`;
+    const now = Date.now();
+    if (now - (pwHintAt.get(key) ?? 0) < 120_000) return "";
+    pwHintAt.set(key, now);
+    if (pwHintAt.size > 100) pwHintAt.delete(pwHintAt.keys().next().value as string);
+    const line = m[0].trim().slice(0, 80);
+    return `[похоже, job «${job.name}» ждёт пароль (${line}). Отправь его ОДНИМ job_input только с паролем — ввод не отображается, это нормально. Следующая обычная команда сейчас станет попыткой пароля и сожжёт одну из трёх. Надёжнее без интерактива одной строкой: echo '<пароль>' | sudo -S <команда>. Если промпт от su/ssh в шелле без PTY — пароль читается из /dev/tty: сначала стабилизируй PTY.]`;
+  } catch {
+    return "";
+  }
+}

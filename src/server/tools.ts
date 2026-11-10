@@ -16,7 +16,7 @@ import { exploitHints } from "./exploits.ts";
 import * as nmap from "./nmap.ts";
 import * as ffuf from "./ffuf.ts";
 import * as sqlmap from "./sqlmap.ts";
-import { shellCatchHint } from "./shellhint.ts";
+import { passwordPromptHint, shellCatchHint } from "./shellhint.ts";
 import { subnetCalc } from "./subnet.ts";
 import { looksLikeWriteup, SPOILER_BLOCK_TEXT } from "./spoilers.ts";
 import { injectionWarning } from "./injection.ts";
@@ -723,9 +723,11 @@ export async function runTool(name: string, rawArgs: string, ctx: ToolCtx): Prom
         }
         // Детект пойманного reverse shell (shellhint.ts): подсказка один раз на подключение.
         const hint = r.job.running && fresh ? shellCatchHint(ctx.taskId, r.job, fresh) : "";
+        // Зависший промпт пароля: следующая обычная команда сгорит как попытка пароля.
+        const pwHint = r.job.running ? passwordPromptHint(ctx.taskId, r.job, r.output) : "";
         // Диагностика листенера: мёртвое соединение/очередь backlog — иначе модель поллит пустой экран.
         const diag = r.job.running ? await sandbox.jobListenerDiag(ctx.taskId, r.job.id).catch(() => "") : "";
-        return [body, hint, diag].filter(Boolean).join("\n");
+        return [body, hint, pwHint, diag].filter(Boolean).join("\n");
       }
       case "job_input": {
         const enter = a.enter !== false && String(a.enter ?? "").toLowerCase() !== "false";

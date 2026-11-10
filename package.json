@@ -1,6 +1,6 @@
 {
   "name": "htb-llm",
-  "version": "0.1.49",
+  "version": "0.1.50",
   "private": true,
   "type": "module",
   "description": "HTB LLM — неофициальный локальный LLM-ассистент для HackTheBox и HTB Academy: Kali на задачу, VPN, RAG и подтверждаемая память",
