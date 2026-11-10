@@ -8,6 +8,8 @@ export type Memory = { id: number; task_id: string; chat_id: string | null; kind
 export type Doc = { id: number; task_id: string | null; name: string; kind: string; pages: number; chunks: number; status: string; error: string | null; created_at: number };
 export type ReasoningInfo = { supportedEfforts: Effort[]; defaultEffort: Effort | null; mandatory: boolean; supportsMaxTokens: boolean; source: "local" | "openrouter" | "custom" };
 export type Health = { llm: boolean; embed: boolean; web: boolean; docker: boolean; image: boolean; model: string; ctxWindow: number; compactAt?: number; preset?: string; llmPreset?: string; embedPreset?: string; reasoning?: ReasoningInfo | null };
+export type ReadinessCheck = { id: string; label: string; state: "ok" | "warn" | "todo"; detail: string };
+export type Readiness = { checks: ReadinessCheck[]; ready: boolean };
 export type Preset = "local" | "openrouter" | "custom";
 export type EndpointPub = { url: string; model: string; provider: string; quantization: string; apiKeySet: boolean };
 export type LlmPub = EndpointPub & { ctxWindow: number; compactAt: number };
@@ -131,6 +133,7 @@ const json = (method: string, body?: unknown): RequestInit => ({ method, headers
 
 export const api = {
   health: () => j<Health>("/api/health"),
+  readiness: () => j<Readiness>("/api/readiness"),
   settings: () => j<AppSettings>("/api/settings"),
   saveSettings: (s: unknown) => j<AppSettings>("/api/settings", json("PUT", s)),
   testSettings: (kind: "llm" | "embed", preset: Preset, config: unknown) =>

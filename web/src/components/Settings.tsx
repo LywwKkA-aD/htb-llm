@@ -337,6 +337,34 @@ function OrStatsBlock({ mgmtKey, setMgmtKey, clearMgmt, setClearMgmt, savedSet }
   );
 }
 
+// Чеклист готовности первого запуска: что уже настроено и где добить остальное.
+function ReadinessBlock() {
+  const [r, setR] = useState<import("../api").Readiness | null>(null);
+  useEffect(() => { api.readiness().then(setR).catch(() => {}); }, []);
+  if (!r) return null;
+  return (
+    <section data-testid="readiness-panel">
+      <div className="mb-2 flex items-center gap-2 text-[13px] font-medium text-fg">
+        <PlugZap size={13} className="text-accent" /> Готовность к работе
+        <span className={r.ready ? "text-[11px] text-accent" : "text-[11px] text-warn"} data-testid="readiness-summary">
+          {r.ready ? "всё обязательное настроено" : `осталось: ${r.checks.filter((c) => c.state === "todo").length}`}
+        </span>
+      </div>
+      <div className="space-y-1">
+        {r.checks.map((c) => (
+          <div key={c.id} className="flex items-start gap-2" data-testid="readiness-check" data-check={c.id} data-state={c.state}>
+            {c.state === "ok" ? <CheckCircle2 size={14} className="mt-px flex-none text-accent" />
+              : c.state === "warn" ? <TriangleAlert size={14} className="mt-px flex-none text-warn" />
+              : <XCircle size={14} className="mt-px flex-none text-err" />}
+            <span className="w-40 flex-none text-[12px] text-fg">{c.label}</span>
+            <span className="min-w-0 flex-1 text-[11.5px] leading-snug text-dim">{c.detail}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function SettingsDialog({ open, onClose, onSaved }: { open: boolean; onClose: () => void; onSaved?: () => void }) {
   const toast = useToast();
   const [saved, setSaved] = useState<AppSettings | null>(null);
@@ -384,6 +412,7 @@ export function SettingsDialog({ open, onClose, onSaved }: { open: boolean; onCl
         <div className="flex items-center gap-2 py-6 text-[12.5px] text-dim"><Loader2 size={13} className="animate-spin" /> загружаю…</div>
       ) : (
         <div className="space-y-6">
+          <ReadinessBlock />
           <section>
             <div className="mb-2 flex items-center gap-2 text-[13px] font-medium text-fg"><KeyRound size={13} className="text-accent" /> Основная модель</div>
             <EndpointForm kind="llm" draft={llm} onChange={setLlm} saved={saved.llm} />

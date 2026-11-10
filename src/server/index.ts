@@ -102,6 +102,30 @@ app.get("/api/health", wrap(async () => {
   return { ...h, docker: dockerOk, image, model: act.model, ctxWindow: act.ctxWindow || cfg.ctxWindow, compactAt: llmCompactAt(), preset: act.preset, llmPreset: act.preset, embedPreset: emb.preset, reasoning };
 }));
 
+// Готовность первого запуска: друг-новичок упирался в шаги по одному (Docker, образ, ключи,
+// пустая база, VPN). Один чеклист с честными состояниями и подсказкой, где чинить.
+app.get("/api/readiness", wrap(async () => {
+  type Check = { id: string; label: string; state: "ok" | "warn" | "todo"; detail: string };
+  const checks: Check[] = [];
+  let dockerOk = false, image = false;
+  try { await sandbox.docker.ping(); dockerOk = true; image = (await sandbox.docker.listImages({ filters: { reference: [cfg.image] } })).length > 0; } catch { /* ниже честный todo */ }
+  checks.push({ id: "docker", label: "Docker и образ Kali", state: dockerOk && image ? "ok" : "todo", detail: dockerOk && image ? "Docker отвечает, образ песочниц собран" : dockerOk ? "Docker отвечает, но образ Kali не собран — первый запуск соберёт его сам (docker/run.sh up или bin/htb-llm start)" : "Docker недоступен — запусти Docker (Desktop или службу); без него песочницы задач не работают" });
+  const llm = activeLlm();
+  const llmOk = !!(llm.url && llm.model && (llm.preset === "local" || llm.apiKey));
+  checks.push({ id: "llm", label: "Модель (LLM)", state: llmOk ? "ok" : "todo", detail: llmOk ? `пресет «${llm.preset}»: ${llm.model}` : "не заполнен адрес, модель или ключ активного пресета — секция «Основная модель» ниже" });
+  const emb = activeEmbed();
+  const embOk = !!(emb.url && emb.model && (emb.preset === "local" || emb.apiKey));
+  checks.push({ id: "embed", label: "Эмбеддинги (RAG)", state: embOk ? "ok" : "todo", detail: embOk ? `пресет «${emb.preset}»: ${emb.model}` : "не заполнен адрес, модель или ключ — секция «Эмбеддинги» ниже; без них база знаний не построится" });
+  const idx = embedIndexInfo();
+  checks.push({ id: "knowledge", label: "База знаний", state: idx.chunks > 0 ? (idx.stale ? "warn" : "ok") : "todo", detail: idx.chunks > 0 ? (idx.stale ? `индекс устарел после смены embed-модели (фрагментов: ${idx.chunks}) — переиндексируй в секции эмбеддингов` : `проиндексировано фрагментов: ${idx.chunks}`) : "индекс пуст — в секции эмбеддингов кнопка «скачать и построить базу» (нужны настроенные эмбеддинги выше и сохранённые настройки)" });
+  const tasks = db.prepare("select id, title from tasks").all() as { id: string; title: string }[];
+  checks.push({ id: "task", label: "Задача", state: tasks.length ? "ok" : "todo", detail: tasks.length ? `задач создано: ${tasks.length}` : "ни одной задачи — создай вручную или импортируй машину из блока HTB слева" });
+  const vpnTask = tasks.find((t) => { try { const d = path.join(paths.taskWork(t.id), ".whitehat", "vpn"); return fs.existsSync(path.join(d, "config.ovpn")) || fs.existsSync(path.join(d, "wg0.conf")); } catch { return false; } });
+  checks.push({ id: "vpn", label: "VPN-конфиг HTB", state: vpnTask ? "ok" : "todo", detail: vpnTask ? `импортирован (задача «${vpnTask.title}») — поднимается во вкладке VPN внутри её контейнера` : "ни в одной задаче не импортирован — скачай конфиг в HTB (Access → VPN) и импортируй файлом во вкладке VPN задачи; без него цели лабы недостижимы" });
+  checks.push({ id: "htb", label: "Аккаунт HTB (необязательно)", state: htb.htbConfigured() ? "ok" : "warn", detail: htb.htbConfigured() ? "App Token подключён: прогресс, запуск машин и сдача флагов — слева внизу" : "не подключён — кнопка «подключить HTB» слева внизу (App Token: app.hackthebox.com → настройки аккаунта)" });
+  return { checks, ready: checks.every((c) => c.state !== "todo") };
+}));
+
 // ---------- общие настройки (модель и эмбеддинги: пресеты локальная / OpenRouter / свой API) ----------
 app.get("/api/settings", wrap(() => ({ ...publicSettings(), embedIndex: embedIndexInfo(), reindex: library.reindexState, knowledge: library.knowledgeState })));
 app.put("/api/settings", wrap((req) => {
