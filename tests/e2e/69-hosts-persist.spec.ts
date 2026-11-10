@@ -32,13 +32,17 @@ test.describe("персистентность /etc/hosts", () => {
   test("vhost-строка скрейпится в hosts.extra, переживает docker restart и переезжает при смене IP", async ({ page, request }) => {
     test.setTimeout(300_000);
     dexec(ids.task.id, "grep -q myvhost /etc/hosts || echo '10.10.10.10 myvhost.persist.htb' >> /etc/hosts; tail -1 /etc/hosts");
+    // второе имя — прямо в строку нашего управляемого блока (так дописывали vhost'ы вживую в Enigma);
+    // блок уже написан применением цели из beforeAll
+    dexec(ids.task.id, "python3 -c \"p='/etc/hosts'; s=open(p).read(); open(p,'w').write(s.replace('machine.htb\\n', 'machine.htb app.persist.htb\\n'))\"");
     await openTask(page, ids);
     // скрейп происходит на ensure перед командами (троттлинг 5 с) — дёргаем, пока не ляжет в hosts.extra
     await expect.poll(async () => {
       await send(page, tt([sh("true")]));
       await waitIdle(page);
       return dexec(ids.task.id, "cat /work/.whitehat/hosts.extra 2>/dev/null || true");
-    }, { timeout: 60_000, intervals: [3000] }).toContain("myvhost.persist.htb");
+    }, { timeout: 60_000, intervals: [3000] }).toContain("app.persist.htb");
+    expect(dexec(ids.task.id, "cat /work/.whitehat/hosts.extra")).toContain("myvhost.persist.htb");
 
     execFileSync("docker", ["restart", `whitehat-${ids.task.id}`], { stdio: "ignore" });
     await page.waitForTimeout(1000);
@@ -52,6 +56,8 @@ test.describe("персистентность /etc/hosts", () => {
     await waitIdle(page);
     const outs = await toolOuts(request, ids.chat.id);
     expect(outs).toContain("10.10.10.99");
-    expect(dexec(ids.task.id, "cat /work/.whitehat/hosts.extra")).toContain("10.10.10.99 myvhost.persist.htb");
+    const extra = dexec(ids.task.id, "cat /work/.whitehat/hosts.extra");
+    expect(extra).toContain("10.10.10.99");
+    expect(extra).toContain("myvhost.persist.htb");
   });
 });
